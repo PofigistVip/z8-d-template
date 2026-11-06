@@ -39,7 +39,11 @@ mine = "org.zenframework.z8.template.view.MyDocuments"
 with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as (connection, env):
     temp = Path(directory)
     config = temp / "server.properties"
-    config.write_text("web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n", encoding="ascii")
+    settings = "web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n"
+    office_home = os.environ.get("Z8_TEST_OFFICE_HOME")
+    if office_home:
+        settings += "office.home=" + Path(office_home).resolve().as_posix() + "\n"
+    config.write_text(settings, encoding="utf-8")
     command = [str(exe), connection, "public", "--initialize", "--config", str(config)]
     for _ in range(2):
         result = subprocess.run(command, env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8", check=True)
@@ -68,12 +72,13 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         port = int(line)
         assert port == 19080, port
 
-        def http_request(path, method="GET", body=None, headers=None):
-            client = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        def http_request(path, method="GET", body=None, headers=None, include_headers=False):
+            client = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
             try:
                 client.request(method, path, body, headers or {})
                 response = client.getresponse()
-                return response.status, response.read()
+                content = response.read()
+                return (response.status, dict(response.getheaders()), content) if include_headers else (response.status, content)
             finally:
                 client.close()
 
@@ -196,6 +201,9 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert pdf["name"] == "export.pdf", pdf
         status, pdf_bytes = http_request("/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session}))
         assert status == 200 and pdf_bytes.startswith(b"%PDF-1.4"), (status, pdf_bytes[:100])
+        preview_url = "/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session, "preview": "false"})
+        status, headers, preview = http_request(preview_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "application/pdf" and "Content-Disposition" not in headers and preview == pdf_bytes, headers
         assert b"/MediaBox [0 0 842 595]" in pdf_bytes, "Default PDF page should be landscape A4"
         assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
         weighted = request(request=documents, session=session, action="export", format="pdf",
@@ -326,6 +334,10 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         file = json.loads(attached["data"][0]["doc"])[0]
         status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
         assert status == 200 and contents == b"Hello template", (status, contents)
+        if office_home:
+            preview_url = "/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"], "preview": "true"})
+            status, headers, preview = http_request(preview_url, include_headers=True)
+            assert status == 200 and headers.get("Content-Type") == "application/pdf" and preview.startswith(b"%PDF-"), (status, headers)
         for format in ("xls", "pdf", "doc", "html"):
             exported = request(request=documents, session=session, action="export", format=format,
                                columns='[{"id":"name"},{"id":"createdAt"},{"id":"doc"}]',
@@ -350,6 +362,21 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert json.loads(detached["data"][0]["doc"]) == [], detached
         status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
         assert status != 200, (status, contents)
+        pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
+                            for key, value in params.items())
+        pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
+                     'Content-Type: application/pdf\r\n\r\n').encode() + pdf_bytes + f'\r\n--{boundary}--\r\n'.encode()
+        status, body = http_request("/request.json", "POST", pdf_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        attached_pdf = json.loads(body)
+        assert status == 200 and attached_pdf["success"], attached_pdf
+        pdf_attachment = json.loads(attached_pdf["data"][0]["doc"])[0]
+        preview_url = "/" + quote(pdf_attachment["path"], safe="/") + "?" + urlencode({"session": session, "id": pdf_attachment["id"], "preview": "false"})
+        status, headers, preview = http_request(preview_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "application/pdf" and "Content-Disposition" not in headers and preview == pdf_bytes, headers
+        request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                fields='["name","doc"]', data=json.dumps([pdf_attachment["id"]]))
+        status, _ = http_request(preview_url)
+        assert status != 200, status
         request(request=documents, session=session, action="action", name="clearHistory",
                 records=json.dumps([record]), selection="[]", parameters="[]")
         assert sql(history) == "0"
