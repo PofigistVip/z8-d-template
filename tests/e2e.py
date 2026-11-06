@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -159,8 +160,21 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                          where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
                                            {"property": "history.documentId", "value": record}]))
         assert nested["info"]["files"][0]["name"] == "export.xlsx", nested
+        pdf = request(request=documents, session=session, action="export", format="pdf",
+                      columns='[{"id":"name","width":150,"minWidth":50}]')["info"]["files"][0]
+        assert pdf["name"] == "export.pdf", pdf
+        status, pdf_bytes = http_request("/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200 and pdf_bytes.startswith(b"%PDF-1.4"), (status, pdf_bytes[:100])
+        assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
+        mapping = {int(cid, 16): bytes.fromhex(unicode.decode()).decode("utf-16-be")
+                   for cid, unicode in re.findall(rb"<([0-9A-F]{4})> <([0-9A-F]{4,8})>\n", pdf_bytes)}
+        text = "".join("".join(mapping[int(chars[i:i+4], 16)] for i in range(0, len(chars), 4))
+                       for chars in re.findall(rb"<([0-9A-F]+)> Tj", pdf_bytes))
+        assert "First" in text and "Другой <&>" in text, text
+        if os.environ.get("Z8_TEST_PDF"):
+            Path(os.environ["Z8_TEST_PDF"]).write_bytes(pdf_bytes)
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session,
-                                    "action": "export", "format": "pdf", "columns": '[{"id":"name"}]'}))
+                                    "action": "export", "format": "doc", "columns": '[{"id":"name"}]'}))
         assert not json.loads(body).get("success"), body
 
         # The original schema generator grants the User role access to
@@ -176,6 +190,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                 values=json.dumps({"recordId": user_id}))
         user_login = request(request="login", login="TemplateUser", password="user-test")
         user_session = user_login["session"]
+        status, _ = http_request("/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": user_session}))
+        assert status != 200, "A different session downloaded the administrator's PDF"
         other_rows = request(request=mine, session=user_session, action="read", fields='["name"]')["data"]
         assert not other_rows, other_rows
         user_meta = request(request=mine, session=user_session, action="meta")
@@ -209,6 +225,13 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         request(request=documents, session=session, action="action", name="clearHistory",
                 records=json.dumps([record]), selection="[]", parameters="[]")
         assert sql(history) == "0"
+        request(request=documents, session=session, action="create", fields='["name"]',
+                data=json.dumps([{"name": "Page test %02d" % i} for i in range(45)]))
+        multipage = request(request=documents, session=session, action="export", format="pdf",
+                            columns='[{"id":"name"}]')["info"]["files"][0]
+        status, content = http_request("/" + quote(multipage["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200 and b"/Count 2 /Kids" in content, (status, content[:100])
+        assert len(export(session, documents)) == 49  # 48 records plus the header
     finally:
         if server.poll() is None:
             server.stdin.write("\n")

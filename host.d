@@ -3,6 +3,7 @@ module webapp_host;
 
 import std.conv : to;
 import std.file : exists;
+import std.path : buildPath;
 import std.stdio : readln, stdout, stderr, writeln;
 import std.string : startsWith, replace;
 import z8.runtime;
@@ -40,6 +41,7 @@ void main(string[] args) {
     }
     if (!configPath.length && exists("server.properties")) configPath = "server.properties";
     if (configPath.length) z8_server_configure_from_file(configPath);
+    if (!initialize) z8_export_configure_pdf_font(buildPath(publicDirectory, "css", "fonts", "roboto", "roboto-regular.ttf"));
     auto db = new Z8PostgresConnection(args[1]); scope(exit) db.close();
     auto schema = args[2].to!wstring;
     auto registry = new Z8RuntimeRegistry(); z8_register_project(registry);
