@@ -17,7 +17,7 @@ import z8.database.scheduler_service;
 import z8.integration.postgres_authority;
 import z8.webserver.civetweb;
 import z8gen.project_registry;
-import z8gen.p_org.p_zenframework.p_z8.p_template.p_SchemaGenerator;
+import z8gen.org.zenframework.z8.template_.SchemaGenerator;
 
 class SchedulerObserver : IZ8SchedulerObserver {
     void onRuns(Z8ScheduledRun[] runs) { }
