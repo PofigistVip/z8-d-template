@@ -113,6 +113,11 @@ else:
                         "--dependency", str(root / "platform/bl")], check=True)
         marker.write_text(fingerprint + "\n", encoding="ascii")
 libraries = [core, *(path.resolve() for path in options.library)]
+compiler_version = subprocess.check_output(["dmd", "--version"], text=True).splitlines()[0].strip()
+for library in libraries:
+    manifest = json.loads((library / "z8-library.json").read_text(encoding="utf-8"))
+    if manifest.get("compiler") != compiler_version:
+        raise SystemExit(f"BL library {manifest.get('id', library)} was built with another DMD version; rebuild with {compiler_version}")
 
 # Keep the generated D modules for inspection. The compiler's temporary
 # objects and libraries are created here too, then removed after the build.
