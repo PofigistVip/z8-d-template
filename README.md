@@ -18,8 +18,11 @@ python build.py --z8-d C:/path/to/z8-d --original-z8 C:/path/to/org.zenframework
 
 Вместо первых двух параметров можно установить `Z8_D_ROOT` и `Z8_ORIGINAL_ROOT`.
 Каталог PostgreSQL определяется через `--postgres-bin`, `Z8_PG_BIN` или
-`pg_config`. Сборка создаёт `build/z8-template.exe` (в Unix — `build/z8-template`)
-и `build/public`; при повторной сборке каталог `build/public` пересоздаётся.
+`pg_config`. Сборка создаёт `build/z8-template.exe` (в Unix — `build/z8-template`),
+клиент в `build/public` и сгенерированные D-модули в `build/generated`.
+При каждой сборке каталоги `build/generated` и `build/public` пересоздаются;
+не храните в них собственные изменения. Временные объектные файлы и библиотеки
+создаются внутри `build/generated` и удаляются после сборки.
 В Windows каталог `bin` PostgreSQL должен находиться в `PATH` при запуске.
 
 ## Запуск

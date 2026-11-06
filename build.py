@@ -45,9 +45,23 @@ def application_sources(folder):
         yield path
 
 
-with tempfile.TemporaryDirectory() as directory:
+build_root = project / "build"
+if build_root.is_symlink() or build_root.resolve() != build_root:
+    raise SystemExit("The build directory must be inside the template project")
+build_root.mkdir(parents=True, exist_ok=True)
+generated = build_root / "generated"
+if generated.is_symlink() or generated.resolve() != generated:
+    raise SystemExit("The generated directory must be inside the build directory")
+if generated.exists():
+    if not generated.is_dir():
+        raise SystemExit("The generated path is not a directory")
+    shutil.rmtree(generated)
+generated.mkdir()
+
+# Keep the generated D modules for inspection. The compiler's temporary
+# objects and libraries are created here too, then removed after the build.
+with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
     temp = Path(directory)
-    generated = temp / "generated"
     subprocess.run([str(compiler), "project", str(project / "src/main/bl"), str(generated),
                     "--dependency", str(language), "--dependency", str(root / "platform/bl")], check=True)
     runtime_source = root / "runtime/source"
@@ -93,4 +107,5 @@ with tempfile.TemporaryDirectory() as directory:
         shutil.rmtree(destination)
     shutil.copytree(public, destination)
 print("Built", output)
+print("Generated D modules", generated)
 print("Prepared client", destination)

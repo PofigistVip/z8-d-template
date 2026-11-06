@@ -25,8 +25,12 @@ from postgres_support import postgres_bin, temporary_postgres
 bin_dir = postgres_bin(args.postgres_bin)
 exe = project / "build" / ("z8-template.exe" if os.name == "nt" else "z8-template")
 public = project / "build/public"
-if not exe.is_file() or not (public / "index.html").is_file():
+generated = project / "build/generated"
+document_module = generated / "z8gen/org/zenframework/z8/template_/model/Document.d"
+if not exe.is_file() or not (public / "index.html").is_file() or not document_module.is_file():
     raise SystemExit("Build the template before running the end-to-end test")
+assert "class Z8_Document" in document_module.read_text(encoding="utf-8")
+assert not list(generated.glob(".build-*")), "Temporary build files were not removed"
 psql = bin_dir / ("psql.exe" if os.name == "nt" else "psql")
 documents = "org.zenframework.z8.template.view.Documents"
 mine = "org.zenframework.z8.template.view.MyDocuments"
