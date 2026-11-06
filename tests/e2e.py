@@ -433,6 +433,21 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                 assert "sandbox" in headers.get("Content-Security-Policy", ""), headers
             request(request=documents, session=session, action="detach", field="doc", recordId=record,
                     fields='["name","doc"]', data=json.dumps([encoded_file["id"]]))
+        duplicate_files = []
+        for payload in (b"first version", b"second version"):
+            duplicate_body = video_body.replace(b"movie.MP4", b"same-name.bin").replace(b"test video", payload)
+            status, body = http_request("/request.json", "POST", duplicate_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            duplicate_response = json.loads(body)
+            assert status == 200 and duplicate_response["success"], duplicate_response
+            duplicate_file = json.loads(duplicate_response["data"][0]["doc"])[0]
+            duplicate_files.append(duplicate_file)
+            assert "/" + duplicate_file["id"].lower() + "/" in duplicate_file["path"].lower(), duplicate_file
+            download_url = "/" + quote(duplicate_file["path"], safe="/") + "?" + urlencode({"session": session, "id": duplicate_file["id"]})
+            status, contents = http_request(download_url)
+            assert status == 200 and contents == payload, (status, contents)
+            request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                    fields='["name","doc"]', data=json.dumps([duplicate_file["id"]]))
+        assert duplicate_files[0]["path"] != duplicate_files[1]["path"], duplicate_files
         pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
                             for key, value in params.items())
         pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
