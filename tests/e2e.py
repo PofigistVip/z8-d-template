@@ -415,6 +415,24 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and headers.get("Content-Type") == "text/plain; charset=UTF-8" and preview == b"test video", (status, headers)
         request(request=documents, session=session, action="detach", field="doc", recordId=record,
                 fields='["name","doc"]', data=json.dumps([unknown_file["id"]]))
+        encoding_cases = [("unicode-le.unknown", "Привет".encode("utf-16"), "text/plain; charset=UTF-16LE"),
+                          ("unicode-be.unknown", b"\xfe\xff" + "Привет".encode("utf-16-be"), "text/plain; charset=UTF-16BE"),
+                          ("unicode32.unknown", b"\x00\x00\xfe\xff" + "Привет".encode("utf-32-be"), "text/plain; charset=UTF-32BE"),
+                          ("unicode32le.unknown", b"\xff\xfe\x00\x00" + "Привет".encode("utf-32-le"), "text/plain; charset=UTF-32LE"),
+                          ("unicode.html", "<p>Привет</p>".encode("utf-16"), "text/html; charset=UTF-16LE")]
+        for filename, encoded_bytes, expected_type in encoding_cases:
+            encoded_body = unknown_body.replace(b"file.unknown", filename.encode()).replace(b"test video", encoded_bytes)
+            status, body = http_request("/request.json", "POST", encoded_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            encoded_attachment = json.loads(body)
+            assert status == 200 and encoded_attachment["success"], encoded_attachment
+            encoded_file = json.loads(encoded_attachment["data"][0]["doc"])[0]
+            encoded_url = "/" + quote(encoded_file["path"], safe="/") + "?" + urlencode({"session": session, "id": encoded_file["id"], "preview": "true"})
+            status, headers, preview = http_request(encoded_url, include_headers=True)
+            assert status == 200 and headers.get("Content-Type") == expected_type and preview == encoded_bytes, (status, headers)
+            if filename.endswith(".html"):
+                assert "sandbox" in headers.get("Content-Security-Policy", ""), headers
+            request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                    fields='["name","doc"]', data=json.dumps([encoded_file["id"]]))
         pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
                             for key, value in params.items())
         pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
