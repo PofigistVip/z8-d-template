@@ -170,6 +170,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
                 root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
             ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            column = root.find(".//s:col", ns)
+            assert column is not None and column.get("customWidth") == "1" and 28 < float(column.get("width")) < 29, ET.tostring(root)
             return [[text.text or "" for text in row.findall(".//s:t", ns)]
                     for row in root.findall(".//s:row", ns)]
 
