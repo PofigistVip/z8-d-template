@@ -42,6 +42,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
     temp = Path(directory)
     config = temp / "server.properties"
     settings = "web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n"
+    if os.environ.get("Z8_TEST_FILES_ON_DISK") == "1":
+        settings += "files.saveOnDisk=true\n"
     office_home = os.environ.get("Z8_TEST_OFFICE_HOME")
     if office_home:
         settings += "office.home=" + Path(office_home).resolve().as_posix() + "\n"
