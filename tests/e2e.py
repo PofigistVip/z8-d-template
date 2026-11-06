@@ -78,12 +78,29 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         created = request(request=documents, session=session, action="create", fields='["name","email"]',
                           data='[{"name":"First","email":"a@example.com"}]')
         record = created["data"][0]["recordId"]
+        # The original form includes the empty FileField array when opening a
+        # linked-field selector for the newly created document.
+        selector_values = {"recordId": record, "doc": [],
+                           "statusId": "00000000-0000-0000-0000-000000000000",
+                           "userId": "00000000-0000-0000-0000-000000000000"}
+        choices = request(request=documents, session=session, action="read", query="status",
+                          fields='["status.name"]', values=json.dumps(selector_values))
+        assert len(choices["data"]) >= 3, choices
         request(request=documents, session=session, action="create", fields='["name"]', data='[{"name":"Other"}]')
         request(request=documents, session=session, action="update", fields='["name","statusId","userId"]',
                 data=json.dumps([{"recordId": record, "statusId": "BA82DA79-E026-4DE2-AA41-7C5E0A821320",
+                                  "status.name": "Новый", "user.name": "Admin",
                                   "userId": "00000000-0000-0000-0000-000000000002"}]))
+        assert sql('SELECT encode(convert_to("Name", \'UTF8\'), \'hex\') FROM "Tmp Statuses" WHERE "RecordId"=\'BA82DA79-E026-4DE2-AA41-7C5E0A821320\'') == "Новый".encode().hex()
         history = '''SELECT count(*) FROM "Tmp History" WHERE "Document" = '%s' ''' % record
         assert sql(history) == "1"
+        # Listbox emits a value-only dependency followed by its parent-link
+        # filter when status.name refreshes the history control.
+        history_rows = request(request=documents, session=session, action="read", query="history",
+                               fields='["history.createdAt","history.status.name","history.user.name","history.description","history.documentId"]',
+                               where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
+                                                 {"property": "history.documentId", "value": record}]))
+        assert len(history_rows["data"]) == 1, history_rows
         rows = request(request=mine, session=session, action="read", fields='["name","statusId","userId"]')["data"]
         assert [row["recordId"] for row in rows] == [record], rows
 
