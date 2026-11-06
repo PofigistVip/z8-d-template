@@ -117,6 +117,12 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         reread = request(request=documents, session=session, action="read", recordId=record,
                          data=json.dumps([{"recordId": record}]))
         assert len(reread["data"]) == 1 and reread["data"][0]["recordId"] == record, reread
+        copied = request(request=documents, session=session, action="copy", recordId=json.dumps([record]),
+                         fields='["name","statusId","userId"]',
+                         data='[{"recordId":"00000000-0000-0000-0000-000000000000"}]')["data"][0]
+        assert copied["recordId"] != record and copied["name"] == "First", copied
+        assert copied["statusId"] == "BA82DA79-E026-4DE2-AA41-7C5E0A821320" and copied["userId"] == "00000000-0000-0000-0000-000000000002", copied
+        request(request=documents, session=session, action="destroy", data=json.dumps([copied["recordId"]]))
         rows = request(request=mine, session=session, action="read", fields='["name","statusId","userId"]')["data"]
         assert [row["recordId"] for row in rows] == [record], rows
 
