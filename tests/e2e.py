@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse
 import http.client
+import hashlib
 import json
 import os
 import subprocess
@@ -108,11 +109,42 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                                                 "undefined": "00000000-0000-0000-0000-000000000002"}]))
         assert len(history_new["data"]) == 1, history_new
         assert sql(history) == "2"
+        history_id = history_new["data"][0]["history.recordId"]
+        edited = request(request=documents, session=session, action="update", query="history",
+                         fields='["history.description","history.documentId"]',
+                         data=json.dumps([{"history.recordId": history_id, "history.description": "Note"}]))
+        assert edited["data"][0]["history.description"] == "Note", edited
         reread = request(request=documents, session=session, action="read", recordId=record,
                          data=json.dumps([{"recordId": record}]))
         assert len(reread["data"]) == 1 and reread["data"][0]["recordId"] == record, reread
         rows = request(request=mine, session=session, action="read", fields='["name","statusId","userId"]')["data"]
         assert [row["recordId"] for row in rows] == [record], rows
+
+        # The original schema generator grants the User role access to
+        # MyDocuments but denies access to the administrator's Documents view.
+        users = "org.zenframework.z8.server.base.table.system.view.UsersView"
+        password_hash = hashlib.md5(b"user-test").hexdigest()
+        account = request(request=users, session=session, action="create", fields='["name"]',
+                          data=json.dumps([{"name": "TemplateUser", "password": password_hash}]))
+        user_id = account["data"][0]["recordId"]
+        request(request=users, session=session, action="create", query="form.userRoles",
+                fields='["form.userRoles.user","form.userRoles.role"]',
+                data=json.dumps([{"form.userRoles.user": user_id, "form.userRoles.role": "421A8413-A8EC-4DAB-9235-9A5FF83341C5"}]),
+                values=json.dumps({"recordId": user_id}))
+        user_login = request(request="login", login="TemplateUser", password="user-test")
+        user_session = user_login["session"]
+        other_rows = request(request=mine, session=user_session, action="read", fields='["name"]')["data"]
+        assert not other_rows, other_rows
+        user_meta = request(request=mine, session=user_session, action="meta")
+        assert any(item["name"] == "status.name" for item in user_meta["controls"]), user_meta
+        own = request(request=mine, session=user_session, action="create", fields='["name"]',
+                      data='[{"name":"Own document"}]')["data"][0]["recordId"]
+        request(request=mine, session=user_session, action="update", fields='["name","userId"]',
+                data=json.dumps([{"recordId": own, "userId": user_id, "user.name": "TemplateUser"}]))
+        assert [row["recordId"] for row in request(request=mine, session=user_session, action="read", fields='["name"]')["data"]] == [own]
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "meta"}))
+        denied = json.loads(body)
+        assert not denied.get("success"), (status, denied)
 
         params = {"request": documents, "session": session, "action": "attach", "field": "doc",
                   "recordId": record, "fields": '["name","doc"]'}
