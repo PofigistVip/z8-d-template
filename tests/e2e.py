@@ -139,6 +139,15 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                          fields='["history.description","history.documentId"]',
                          data=json.dumps([{"history.recordId": history_id, "history.description": "Note"}]))
         assert edited["data"][0]["history.description"] == "Note", edited
+        deleted = request(request=documents, session=session, action="destroy", query="history",
+                          data=json.dumps([{"history.recordId": history_id}]))
+        assert deleted["success"] and sql(history) == "1", deleted
+        history_new = request(request=documents, session=session, action="create", query="history",
+                              fields='["history.createdAt","history.status.name","history.user.name","history.description","history.documentId"]',
+                              data=json.dumps([{"history.recordId": "00000000-0000-0000-0000-000000000000",
+                                                "history.documentId": record,
+                                                "history.description": "Note"}]))
+        assert len(history_new["data"]) == 1 and sql(history) == "2", history_new
         reread = request(request=documents, session=session, action="read", recordId=record,
                          data=json.dumps([{"recordId": record}]))
         assert len(reread["data"]) == 1 and reread["data"][0]["recordId"] == record, reread
