@@ -452,23 +452,24 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert duplicate_files[0]["path"] != duplicate_files[1]["path"], duplicate_files
         # A newly stored database attachment may be requested by multiple
         # workers before its on-disk cache exists; every response must be complete.
-        cache_payload = bytes(range(256)) * 2048
-        cache_body = video_body.replace(b"movie.MP4", b"concurrent.bin").replace(b"test video", cache_payload)
-        status, body = http_request("/request.json", "POST", cache_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
-        cached_attachment = json.loads(body)
-        assert status == 200 and cached_attachment["success"], cached_attachment
-        cached_file = json.loads(cached_attachment["data"][0]["doc"])[0]
-        cache_url = "/" + quote(cached_file["path"], safe="/") + "?" + urlencode({"session": session, "id": cached_file["id"]})
-        gate = threading.Barrier(8)
-        def simultaneous_download(_):
-            gate.wait(timeout=20)
-            return http_request(cache_url)
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(simultaneous_download, range(8)))
-        assert all(status == 200 and contents == cache_payload for status, contents in results), [status for status, _ in results]
-        assert not list(temp.rglob(".z8-cache-*")), "Temporary cache directories were not cleaned up"
-        request(request=documents, session=session, action="detach", field="doc", recordId=record,
-                fields='["name","doc"]', data=json.dumps([cached_file["id"]]))
+        for attempt in range(4):
+            cache_payload = bytes(range(256)) * 2048
+            cache_body = video_body.replace(b"movie.MP4", ("concurrent-%d.bin" % attempt).encode()).replace(b"test video", cache_payload)
+            status, body = http_request("/request.json", "POST", cache_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            cached_attachment = json.loads(body)
+            assert status == 200 and cached_attachment["success"], cached_attachment
+            cached_file = json.loads(cached_attachment["data"][0]["doc"])[0]
+            cache_url = "/" + quote(cached_file["path"], safe="/") + "?" + urlencode({"session": session, "id": cached_file["id"]})
+            gate = threading.Barrier(8)
+            def simultaneous_download(_):
+                gate.wait(timeout=20)
+                return http_request(cache_url)
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(simultaneous_download, range(8)))
+            assert all(status == 200 and contents == cache_payload for status, contents in results), [(status, contents[:500]) for status, contents in results if status != 200]
+            assert not list(temp.rglob(".z8-cache-*")), "Temporary cache directories were not cleaned up"
+            request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                    fields='["name","doc"]', data=json.dumps([cached_file["id"]]))
         pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
                             for key, value in params.items())
         pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
