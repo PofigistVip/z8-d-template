@@ -196,6 +196,20 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and pdf_bytes.startswith(b"%PDF-1.4"), (status, pdf_bytes[:100])
         assert b"/MediaBox [0 0 842 595]" in pdf_bytes, "Default PDF page should be landscape A4"
         assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
+        weighted = request(request=documents, session=session, action="export", format="pdf",
+                           columns=json.dumps([{"id": "name", "width": 300}, {"id": "email", "width": 100, "minWidth": 300}]))["info"]["files"][0]
+        status, weighted_pdf = http_request("/" + quote(weighted["path"], safe="/") + "?" + urlencode({"session": session}))
+        rectangles = re.findall(rb"q (\d+) (\d+) (\d+) 18 re W n", weighted_pdf)
+        assert status == 200 and len(rectangles) >= 2, rectangles
+        assert [(int(x), int(width)) for x, _, width in rectangles[:2]] == [(28, 486), (514, 300)], rectangles[:2]
+        constrained = request(request=documents, session=session, action="export", format="pdf",
+                              columns=json.dumps([{"id": "name", "width": 0, "minWidth": 900}, {"id": "email", "width": 0, "minWidth": 900}]))["info"]["files"][0]
+        status, constrained_pdf = http_request("/" + quote(constrained["path"], safe="/") + "?" + urlencode({"session": session}))
+        rectangles = re.findall(rb"q (\d+) (\d+) (\d+) 18 re W n", constrained_pdf)
+        assert status == 200 and [(int(x), int(width)) for x, _, width in rectangles[:2]] == [(28, 393), (421, 393)], rectangles[:2]
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session, "action": "export", "format": "pdf",
+                                    "columns": json.dumps([{"id": "name", "width": -1}])}))
+        assert not json.loads(body).get("success"), body
         portrait = request(request=documents, session=session, action="export", format="pdf",
                            columns='[{"id":"name"}]', options=json.dumps({"pageFormat": "A5", "pageOrientation": "portrait", "leftMargin": 5}))["info"]["files"][0]
         status, portrait_bytes = http_request("/" + quote(portrait["path"], safe="/") + "?" + urlencode({"session": session}))
