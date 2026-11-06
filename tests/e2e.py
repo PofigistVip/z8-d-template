@@ -182,6 +182,12 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
 
         exported = export(session, documents, where=json.dumps({"property": "name", "value": "First"}))
         assert len(exported) == 2 and exported[1] == ["First"], exported
+        if office_home:
+            generated_file = request(request=documents, session=session, action="export", format="xls",
+                                columns='[{"id":"name"}]')["info"]["files"][0]
+            generated_preview = "/" + quote(generated_file["path"], safe="/") + "?" + urlencode({"session": session, "preview": "true"})
+            status, headers, content = http_request(generated_preview, include_headers=True)
+            assert status == 200 and headers.get("Content-Type") == "application/pdf" and content.startswith(b"%PDF-"), (status, headers)
         exported = export(session, documents)
         assert {tuple(row) for row in exported[1:]} == {("First",), ("Другой <&>",)}, exported
         nested = request(request=documents, session=session, action="export", format="xls", query="history",
@@ -204,6 +210,9 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         preview_url = "/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session, "preview": "false"})
         status, headers, preview = http_request(preview_url, include_headers=True)
         assert status == 200 and headers.get("Content-Type") == "application/pdf" and "Content-Disposition" not in headers and preview == pdf_bytes, headers
+        stamped_url = "/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session, "preview": "true", "stamps": "[]"})
+        status, headers, preview = http_request(stamped_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "application/pdf" and preview == pdf_bytes, headers
         assert b"/MediaBox [0 0 842 595]" in pdf_bytes, "Default PDF page should be landscape A4"
         assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
         weighted = request(request=documents, session=session, action="export", format="pdf",
