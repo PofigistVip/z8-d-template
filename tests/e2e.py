@@ -278,7 +278,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         file = json.loads(attached["data"][0]["doc"])[0]
         status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
         assert status == 200 and contents == b"Hello template", (status, contents)
-        for format in ("xls", "pdf"):
+        for format in ("xls", "pdf", "doc", "html"):
             exported = request(request=documents, session=session, action="export", format=format,
                                columns='[{"id":"name"},{"id":"createdAt"},{"id":"doc"}]',
                                where=json.dumps({"property": "name", "value": "First"}))["info"]["files"][0]
@@ -288,9 +288,20 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                 with zipfile.ZipFile(io.BytesIO(content)) as archive:
                     root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
                 texts = " ".join(item.text or "" for item in root.iter() if item.tag.endswith("}t"))
-            else:
+            elif format == "pdf":
                 texts = pdf_text(content)
+            elif format == "doc":
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    root = ET.fromstring(archive.read("word/document.xml"))
+                texts = " ".join(item.text or "" for item in root.iter() if item.tag.endswith("}t"))
+            else:
+                texts = content.decode("utf-8")
             assert "document.txt" in texts and re.search(r"\d{2}\.\d{2}\.\d{4}", texts), texts
+        detached = request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                           fields='["name","doc"]', data=json.dumps([file["id"]]))
+        assert json.loads(detached["data"][0]["doc"]) == [], detached
+        status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
+        assert status != 200, (status, contents)
         request(request=documents, session=session, action="action", name="clearHistory",
                 records=json.dumps([record]), selection="[]", parameters="[]")
         assert sql(history) == "0"
