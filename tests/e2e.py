@@ -194,7 +194,16 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert pdf["name"] == "export.pdf", pdf
         status, pdf_bytes = http_request("/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session}))
         assert status == 200 and pdf_bytes.startswith(b"%PDF-1.4"), (status, pdf_bytes[:100])
+        assert b"/MediaBox [0 0 842 595]" in pdf_bytes, "Default PDF page should be landscape A4"
         assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
+        portrait = request(request=documents, session=session, action="export", format="pdf",
+                           columns='[{"id":"name"}]', options=json.dumps({"pageFormat": "A5", "pageOrientation": "portrait", "leftMargin": 5}))["info"]["files"][0]
+        status, portrait_bytes = http_request("/" + quote(portrait["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200 and b"/MediaBox [0 0 420 595]" in portrait_bytes and b"q 14 " in portrait_bytes, status
+        for options in ({"pageOrientation": "diagonal"}, {"pageFormat": "unknown"}, {"leftMargin": 9999}):
+            status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session, "action": "export",
+                                        "format": "pdf", "columns": '[{"id":"name"}]', "options": json.dumps(options)}))
+            assert not json.loads(body).get("success"), body
         def pdf_text(content):
             mapping = {int(cid, 16): bytes.fromhex(unicode.decode()).decode("utf-16-be")
                        for cid, unicode in re.findall(rb"<([0-9A-F]{4})> <([0-9A-F]{4,8})>\n", content)}
