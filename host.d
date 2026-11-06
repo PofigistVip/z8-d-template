@@ -30,17 +30,17 @@ class DisabledSchedulerControl : IZ8SchedulerControl, IZ8SchedulerSuspension {
 }
 
 void main(string[] args) {
-    if (args.length < 3) throw new Exception("usage: z8-template <postgres-connection> <schema> [--initialize] [--listen <address:port>] [--public-dir <path>] [--config <path>]");
-    bool initialize; string publicDirectory = "build/public", configPath, listenAddress = "127.0.0.1:9080";
+    if (args.length < 3) throw new Exception("usage: z8-template <postgres-connection> <schema> [--initialize] [--public-dir <path>] [--config <path>]");
+    bool initialize; string publicDirectory = "build/public", configPath;
     for (size_t i = 3; i < args.length; ++i) {
         if (args[i] == "--initialize" && !initialize) initialize = true;
         else if (args[i] == "--public-dir" && i + 1 < args.length) publicDirectory = args[++i];
-        else if (args[i] == "--listen" && i + 1 < args.length) listenAddress = args[++i];
         else if (args[i] == "--config" && !configPath.length && i + 1 < args.length) configPath = args[++i];
         else throw new Exception("invalid option");
     }
     if (!configPath.length && exists("server.properties")) configPath = "server.properties";
     if (configPath.length) z8_server_configure_from_file(configPath);
+    auto listenAddress = z8_server_http_listen_address();
     if (!initialize) z8_export_configure_pdf_font(buildPath(publicDirectory, "css", "fonts", "roboto", "roboto-regular.ttf"));
     auto db = new Z8PostgresConnection(args[1]); scope(exit) db.close();
     auto schema = args[2].to!wstring;

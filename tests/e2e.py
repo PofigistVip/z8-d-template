@@ -33,11 +33,17 @@ mine = "org.zenframework.z8.template.view.MyDocuments"
 with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as (connection, env):
     temp = Path(directory)
     config = temp / "server.properties"
-    config.write_text("web.client.hashPassword=false\nscheduler.enabled=false\n", encoding="ascii")
+    config.write_text("web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n", encoding="ascii")
     command = [str(exe), connection, "public", "--initialize", "--config", str(config)]
     for _ in range(2):
         result = subprocess.run(command, env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8", check=True)
         assert result.stdout.strip() == "initialized", result.stdout
+    invalid_config = temp / "invalid.properties"
+    for invalid in ("0", "65536", "not-a-port"):
+        invalid_config.write_text("web.server.http.port=" + invalid + "\n", encoding="ascii")
+        result = subprocess.run([str(exe), connection, "public", "--initialize", "--config", str(invalid_config)],
+                                env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8")
+        assert result.returncode and "web.server.http.port" in result.stderr, result.stderr
     subprocess.run([str(psql), "-v", "ON_ERROR_STOP=1", "-c",
                     '''UPDATE "SystemUsers" SET "Password"=md5('template-test') WHERE "RecordId"='00000000-0000-0000-0000-000000000002' ''', connection],
                    env=env, capture_output=True, check=True)
@@ -46,7 +52,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         return subprocess.check_output([str(psql), "-tAc", query, connection], env=env, text=True).strip()
 
     assert sql('SELECT count(*) FROM "Tmp Statuses" WHERE "RecordId" <> \'00000000-0000-0000-0000-000000000000\'') == "3"
-    server = subprocess.Popen([str(exe), connection, "public", "--listen", "127.0.0.1:0", "--public-dir", str(public), "--config", str(config)],
+    server = subprocess.Popen([str(exe), connection, "public", "--public-dir", str(public)],
                               env=env, cwd=temp, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, encoding="utf-8")
     try:
@@ -54,6 +60,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         if not line.isdigit():
             raise RuntimeError("Server did not start: " + line + server.stderr.read())
         port = int(line)
+        assert port == 19080, port
 
         def http_request(path, method="GET", body=None, headers=None):
             client = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -156,10 +163,17 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         exported = export(session, documents)
         assert {tuple(row) for row in exported[1:]} == {("First",), ("Другой <&>",)}, exported
         nested = request(request=documents, session=session, action="export", format="xls", query="history",
-                         columns=json.dumps([{"id": "history.description", "width": 150, "minWidth": 50}]),
+                         columns=json.dumps([{"id": field, "width": 150, "minWidth": 50}
+                                             for field in ("history.createdAt", "history.status.name", "history.user.name")]),
                          where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
-                                           {"property": "history.documentId", "value": record}]))
+                                           {"property": "history.documentId", "value": record}]),
+                         values=json.dumps(selector_values))
         assert nested["info"]["files"][0]["name"] == "export.xlsx", nested
+        status, nested_content = http_request("/" + quote(nested["info"]["files"][0]["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200, status
+        with zipfile.ZipFile(io.BytesIO(nested_content)) as archive:
+            nested_sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        assert len([item for item in nested_sheet.iter() if item.tag.endswith("}row")]) == 3
         pdf = request(request=documents, session=session, action="export", format="pdf",
                       columns='[{"id":"name","width":150,"minWidth":50}]')["info"]["files"][0]
         assert pdf["name"] == "export.pdf", pdf

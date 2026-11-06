@@ -1,7 +1,7 @@
 /build/
 /.dub/
 /work/
-/server.properties
+/server.local.properties
 __pycache__/
 *.py[cod]
 *.obj
