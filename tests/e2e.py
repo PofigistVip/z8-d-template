@@ -30,6 +30,8 @@ document_module = generated / "z8gen/org/zenframework/z8/template_/model/Documen
 if not exe.is_file() or not (public / "index.html").is_file() or not document_module.is_file():
     raise SystemExit("Build the template before running the end-to-end test")
 assert "class Z8_Document" in document_module.read_text(encoding="utf-8")
+assert "import z8lib." in document_module.read_text(encoding="utf-8")
+assert not (generated / "z8gen/org/zenframework/z8/server").exists(), "Framework classes were generated in the application"
 assert not list(generated.glob(".build-*")), "Temporary build files were not removed"
 psql = bin_dir / ("psql.exe" if os.name == "nt" else "psql")
 documents = "org.zenframework.z8.template.view.Documents"
