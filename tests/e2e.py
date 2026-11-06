@@ -166,10 +166,12 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         status, pdf_bytes = http_request("/" + quote(pdf["path"], safe="/") + "?" + urlencode({"session": session}))
         assert status == 200 and pdf_bytes.startswith(b"%PDF-1.4"), (status, pdf_bytes[:100])
         assert (public / "css/fonts/roboto/roboto-regular.ttf").read_bytes() in pdf_bytes
-        mapping = {int(cid, 16): bytes.fromhex(unicode.decode()).decode("utf-16-be")
-                   for cid, unicode in re.findall(rb"<([0-9A-F]{4})> <([0-9A-F]{4,8})>\n", pdf_bytes)}
-        text = "".join("".join(mapping[int(chars[i:i+4], 16)] for i in range(0, len(chars), 4))
-                       for chars in re.findall(rb"<([0-9A-F]+)> Tj", pdf_bytes))
+        def pdf_text(content):
+            mapping = {int(cid, 16): bytes.fromhex(unicode.decode()).decode("utf-16-be")
+                       for cid, unicode in re.findall(rb"<([0-9A-F]{4})> <([0-9A-F]{4,8})>\n", content)}
+            return "".join("".join(mapping[int(chars[i:i+4], 16)] for i in range(0, len(chars), 4))
+                           for chars in re.findall(rb"<([0-9A-F]+)> Tj", content))
+        text = pdf_text(pdf_bytes)
         assert "First" in text and "Другой <&>" in text, text
         if os.environ.get("Z8_TEST_PDF"):
             Path(os.environ["Z8_TEST_PDF"]).write_bytes(pdf_bytes)
@@ -222,6 +224,19 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         file = json.loads(attached["data"][0]["doc"])[0]
         status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
         assert status == 200 and contents == b"Hello template", (status, contents)
+        for format in ("xls", "pdf"):
+            exported = request(request=documents, session=session, action="export", format=format,
+                               columns='[{"id":"name"},{"id":"createdAt"},{"id":"doc"}]',
+                               where=json.dumps({"property": "name", "value": "First"}))["info"]["files"][0]
+            status, content = http_request("/" + quote(exported["path"], safe="/") + "?" + urlencode({"session": session}))
+            assert status == 200, status
+            if format == "xls":
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+                texts = " ".join(item.text or "" for item in root.iter() if item.tag.endswith("}t"))
+            else:
+                texts = pdf_text(content)
+            assert "document.txt" in texts and re.search(r"\d{2}\.\d{2}\.\d{4}", texts), texts
         request(request=documents, session=session, action="action", name="clearHistory",
                 records=json.dumps([record]), selection="[]", parameters="[]")
         assert sql(history) == "0"
