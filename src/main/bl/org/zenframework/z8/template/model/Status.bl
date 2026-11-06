@@ -1,0 +1,39 @@
+import org.zenframework.z8.base.table.Table;
+import org.zenframework.z8.base.table.value.StringField;
+
+/*
+ * Атрибут [generatable] указывает Z8, что таблица, которую описывает класс,
+ * должна быть создана в БД
+ */
+[generatable]
+
+/* Атрибут [name] определяет имя таблицы в БД */
+[name "Tmp Statuses"]
+
+/* Класс Status описывает таблицу в БД для хранения статусов документов */
+public class Status extends Table {
+
+	/* Атрибут [displayName] определяет имя, с которым поле name отображается в UI */
+	[displayName "Статус"]
+	/* Атрибут [name] определяет имя столбца в таблице БД */
+	[name "Name"]
+	public StringField name;
+
+	/*
+	 * records определяет массив "статических" записей в таблице,
+	 * т.е. записей, которые будут созданы сразу после создания таблицы
+	 */
+	records {
+		/* Атрибут [name] определяет значение поле "name" для записи New */
+		[name "Новый"]
+		/* New - имя константы, guid - идентификатор записи (recordId) в таблице */
+		New = 'BA82DA79-E026-4DE2-AA41-7C5E0A821320';
+
+		[name "В работе"]
+		InWork = '6B54A703-C804-43EB-9E02-AAACD1290903';
+
+		[name "Исполнен"]
+		Done = '3347743E-11C0-4079-8CDD-F632A82DE961';
+	}
+
+}

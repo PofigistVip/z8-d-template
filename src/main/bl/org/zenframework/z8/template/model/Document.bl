@@ -1,0 +1,82 @@
+import org.zenframework.z8.base.table.Table;
+import org.zenframework.z8.base.table.system.Users;
+import org.zenframework.z8.base.table.value.FileField;
+import org.zenframework.z8.base.table.value.Link;
+import org.zenframework.z8.base.table.value.StringExpression;
+import org.zenframework.z8.base.table.value.StringField;
+
+/*
+ * Атрибут [generatable] указывает Z8, что таблица, которую описывает класс,
+ * должна быть создана в БД
+ */
+[generatable]
+
+/* Атрибут [name] определяет имя таблицы в БД */
+[name "Tmp Documents"]
+
+/* Класс Document описывает таблицу в БД для хранения документов */
+public class Document extends Table {
+
+	/* Таблица, на которую ссылается поле statusId по Foreign Key */
+	public Status status;
+	/* Ссылка на таблицу Status по Foreign Key, атрибут [name] определяет имя поля statusId в БД */
+	[name "Status"] public Link statusId = status;
+
+	public Users user;
+	[name "User"] public Link userId = user;
+
+	/* Атрибут [displayName] определяет имя, с которым поле createdAt отображается в UI */
+	[displayName "Создан"] createdAt;
+	[name "Name"]
+	[displayName "Документ"] public StringField name;
+	[displayName "Ответственный"] user.name;
+
+	/* Атрибут [name] определяет имя поля doc в БД */
+	[name "Doc"]
+	/* Атрибут [displayName] определяет имя, с которым поле doc отображается в UI */
+	[displayName "Файл"]
+	/* FileField - тип поля для хранения одного файла */
+	public FileField doc;
+
+	[name "Email"]
+	[displayName "E-Mail"]
+	/* StringField - поле для хранения строковой информации ограниченной длины */
+	public StringField email;
+	/* Максимальная длина значения поля email */
+	email.length = 50;
+
+	[displayName "Документ"]
+	/*
+	 * StringExpression - строковое вычисляемое выражение.
+	 * Z8 генерирует SQL-выражение в соответствии с указанным значением выражения BL
+	 */
+	public StringExpression fullName = name + " - " + status.name + " (" + user.name + ")";
+
+	/*
+	 * virtual - модфикатор мметода, указывающий на возможность его переопределения
+	 * Метод afterUpdate вызывается после изменения записи в таблице
+	 * аргумент recordId - идентификатор изменяемой записи
+	 */
+	virtual protected void afterUpdate(guid recordId) {
+		// Вызов метода из родительского класса
+		super.afterUpdate(recordId);
+
+		// Если не изменено значение ни поля statusId, ни userId, выйти из метода
+		if (!statusId.isChanged() && !userId.isChanged())
+			return;
+
+		// Если изменено значение поля statusId или userId, необходимо записать изменение в историю
+
+		// Создание экземпляра класса History для работы с таблицей
+		History history;
+		// Установка ссылки на изменяемый документ
+		history.documentId = recordId;
+		// Установка нового значения statusId
+		history.statusId = statusId.get();
+		// Установка нового значения userId
+		history.userId = userId.get();
+		// Создание записи в таблице History с установленными значениями полей
+		history.create();
+	}
+
+}

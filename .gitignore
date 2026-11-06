@@ -1,0 +1,9 @@
+/build/
+/.dub/
+/work/
+/server.properties
+__pycache__/
+*.py[cod]
+*.obj
+*.pdb
+*.ilk

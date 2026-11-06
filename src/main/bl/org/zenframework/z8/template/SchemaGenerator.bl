@@ -1,0 +1,42 @@
+import org.zenframework.z8.base.table.system.Roles;
+import org.zenframework.z8.base.table.system.Users;
+import org.zenframework.z8.template.runtime.Setup;
+
+/*
+ * Объект класса SchemaGenerator создаётся при запуске процедуры генерации схемы данных.
+ * SchemaGenerator может быть переопределён в проекте. Непосредственно перед выполнением процедуры
+ * запускается beforeStart(), сразу после - afterFinish()
+ */
+public class SchemaGenerator extends org.zenframework.z8.base.table.SchemaGenerator {
+
+	virtual public void beforeStart() {
+		super.beforeStart();
+	}
+
+	/*
+	 * Метод запускается сразу после генерации схемы данных.
+	 * В теле метода производится настройка прав доступа к таблицам и представлениям,
+	 * инициализация меню для пользователя Admin
+	 */
+	virtual public void afterFinish() {
+		super.afterFinish();
+
+		// Создать экземпляр объекта установок
+		Setup setup;
+
+		// Запретить роли User доступ к приватным таблицам
+		setup.setTableAccess(setup.privateTables, guid[] { Roles.User }, false, false, false, false, false);
+		// Разрешить роли User доступ к публичным таблицам
+		setup.setTableAccess(setup.publicTables, guid[] { Roles.Administrator, Roles.User }, true, true, true, true, true);
+
+		// Запретить роли User доступ к приватным запросам
+		setup.setRequestAccess(setup.privateRequests, guid[] { Roles.User }, false);
+		// Разрешить роли User доступ к публичным запросам
+		setup.setRequestAccess(setup.publicRequests, guid[] { Roles.User }, true);
+
+		// Добаить пользователю Administrator все пункты меню
+		setup.addEntries(setup.privateEntries, Users.Administrator);
+		setup.addEntries(setup.publicEntries, Users.Administrator);
+	}
+
+}

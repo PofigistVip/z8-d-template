@@ -1,0 +1,35 @@
+import org.zenframework.z8.base.table.Table;
+import org.zenframework.z8.base.table.system.Users;
+import org.zenframework.z8.base.table.value.Link;
+import org.zenframework.z8.base.table.value.TextField;
+
+/*
+ * Атрибут [generatable] указывает Z8, что таблица, которую описывает класс,
+ * должна быть создана в БД
+ */
+[generatable]
+
+/* Атрибут [name] определяет имя таблицы в БД */
+[name "Tmp History"]
+
+/* Класс History описывает таблицу в БД для хранения истории работы с документами */
+public class History extends Table {
+
+	/* Таблица, на которую ссылается поле documentId по Foreign Key */
+	public Document document;
+	/* Ссылка на таблицу Document по Foreign Key, атрибут [name] определяет имя поля documentId в БД */
+	[name "Document"] public Link documentId = document;
+
+	public Status status;
+	[name "Status"] public Link statusId = status;
+
+	public Users user;
+	[name "User"] public Link userId = user;
+
+	/* Атрибут [displayName] определяет имя, с которым поле createdAt отображается в UI */
+	[displayName "Дата"] createdAt;
+	[name "Description"]
+	[displayName "Примечание"] public TextField description;
+	[displayName "Ответствунный"] user.name;
+
+}

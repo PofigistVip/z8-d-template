@@ -1,0 +1,188 @@
+import org.zenframework.z8.base.application.Application;
+import org.zenframework.z8.base.table.Sql;
+import org.zenframework.z8.base.table.Table;
+import org.zenframework.z8.base.table.system.Entries;
+import org.zenframework.z8.base.table.system.RoleFieldAccess;
+import org.zenframework.z8.base.table.system.RoleRequestAccess;
+import org.zenframework.z8.base.table.system.RoleTableAccess;
+import org.zenframework.z8.base.table.system.UserEntries;
+import org.zenframework.z8.base.table.system.UserRoles;
+import org.zenframework.z8.base.table.value.Field;
+import org.zenframework.z8.lang.Object;
+import org.zenframework.z8.template.model.Document;
+import org.zenframework.z8.template.model.History;
+import org.zenframework.z8.template.model.Status;
+import org.zenframework.z8.template.view.Documents;
+import org.zenframework.z8.template.view.MyDocuments;
+
+/* Класс-помощник для настройки приложения */
+public class Setup {
+
+	/* Системная таблица Z8, хранящая правила доступа ролей к таблицам */
+	private RoleTableAccess tableAccess;
+
+	/* Системная таблица Z8, хранящая правила доступа ролей к полям таблиц */
+	private RoleFieldAccess fieldAccess;
+
+	/* Системная таблица Z8, хранящая правила доступа ролей к запросам */
+	private RoleRequestAccess requestAccess;
+
+	/* Системная таблица Z8, хранящая отношение пользователей и ролей */
+	private UserRoles userRoles;
+
+	/* Системная таблица Z8, хранящая пункты меню, доступные пользователям */
+	private UserEntries userEntries;
+
+	/* Системная таблица Z8, хранящая пункты меню приложения */
+	private Entries entries;
+
+	/* Таблица приложения для хранения документов */
+	private Document document;
+
+	/* Таблица приложения для хранения статусов документов */
+	private Status status;
+
+	/* Таблица приложения для хранения истории изменения документов */
+	private History history;
+
+	/* Представление данных для просмотра и редактирования всех документов */
+	private Documents documents;
+
+	/* Представление данных для просмотра и редактирования документов */
+	private MyDocuments myDocuments;
+
+	/* Массив приватных таблиц */
+	public final Table[] privateTables = {};
+
+	/* Массив публичных таблиц */
+	public final Table[] publicTables = {
+		document
+	};
+
+	/* Массив таблиц только для чтения */
+	public final Table[] readOnlyTables = {
+		status
+	};
+
+	/* Массив таблиц, из которых запрещено удалять записи */
+	public final Table[] noDestoryTables = {
+		history
+	};
+
+	/* Массив приватных запросов, доступных только администратору */
+	public final Object[] privateRequests = {
+		documents
+	};
+
+	/* Массив публичных запросов */
+	public final Object[] publicRequests = {
+		myDocuments
+	};
+
+	/* Массив приватных пунктов меню, доступных только администратору */
+	public final int[Object] privateEntries = {
+		(documents, 1)
+	};
+
+	/* Массив публичных пунктов меню */
+	public final int[Object] publicEntries = {
+		(myDocuments, 2)
+	};
+
+	/*
+	 * Метод, устанавливающий права доступа заданных ролей к заданным таблицам
+	 *    tables - массив таблиц
+	 *    roles - массив ролей
+	 *    read, write, create, copy, destroy - разрешения на действия над записями в таблице
+	 */
+	public void setTableAccess(Table[] tables, guid[] roles, bool read, bool write, bool create, bool copy, bool destroy) {
+		tableAccess.read = read;
+		tableAccess.write = write;
+		tableAccess.create = create;
+		tableAccess.copy = copy;
+		tableAccess.destroy = destroy;
+		tableAccess.update(Sql.inVector(tableAccess.tables.classId, classNames(tables)) && Sql.inVector(tableAccess.role, roles));
+
+		fieldAccess.read = read;
+		fieldAccess.write = write;
+		fieldAccess.update(Sql.inVector(fieldAccess.fields.tables.classId, classNames(tables)) && Sql.inVector(fieldAccess.role, roles));
+	}
+
+	/*
+	 * Метод, устанавливающий права доступа заданных ролей к заданным запросам
+	 *    requests - массив запросов
+	 *    roles - массив ролей
+	 *    execute - разрешение на исполнение запроса
+	 */
+	public void setRequestAccess(Object[] requests, guid[] roles, bool execute) {
+		requestAccess.execute = execute;
+		requestAccess.update(Sql.inVector(requestAccess.requests.classId, classNames(requests)) && Sql.inVector(requestAccess.role, roles));
+	}
+
+	/* Метод, добавляющий пользователю заданный перечень ролей */
+	public void addRoles(guid[] roles, guid user) {
+		guid[guid] existingRoles;
+
+		userRoles.read(Field[] { userRoles.role }, userRoles.user == user);
+		while (userRoles.next())
+			existingRoles.add(userRoles.role.get(), userRoles.recordId());
+
+		for (guid role : roles) {
+			if (!existingRoles.containsKey(role)) {
+				userRoles.user = user;
+				userRoles.role = role;
+				userRoles.create();
+			}
+		}
+	}
+
+	/* Метод, добавляющий пользователю заданный перечень пунктов меню */
+	public void addEntries(int[Object] entriesCls, guid user) {
+		guid[string] entriesByClass = idsByValue(entries, entries.classId);
+		guid[guid] existingEntries;
+
+		userEntries.read(Field[] { userEntries.entry }, userEntries.user == user);
+		while (userEntries.next())
+			existingEntries.add(userEntries.entry.get(), userEntries.recordId());
+
+		for (Object entry : entriesCls.keys()) {
+			guid entryId = entriesByClass[entry.className()] ?: guid.Null;
+			guid existingEntry = existingEntries[entryId] ?: guid.Null;
+			userEntries.position = entriesCls[entry];
+			if (existingEntry == guid.Null) {
+				userEntries.user = user;
+				userEntries.entry = entryId;
+				userEntries.create();
+			} else {
+				userEntries.update(existingEntry);
+			}
+		}
+	}
+
+	/* Метод, удаляющий заданные пункты из меню пользователя */
+	public void removeEntries(Object[] entries, guid user) {
+		userEntries.destroy(Sql.inVector(userEntries.entries.classId, classNames(entries)) && userEntries.user == user);
+	}
+
+	/* Метод, возвращающий карту (Map) идентификаторов записей таблицы по значению заданного поля таблицы */
+	private static guid[string] idsByValue(Table table, Field field) {
+		guid[string] idByValues;
+		table.read(Field[] { field });
+		while (table.next()) {
+			string value = field.primary().toString();
+			if (idByValues.containsKey(value))
+				Application.warning(table.name() + ": Повторяющееся значение (" + field.name() + "): " + value);
+			idByValues.add(value, table.recordId());
+		}
+		return idByValues;
+	}
+
+	/* Метод, возвращающий список имён классов для заданного массива объектов */
+	private static string[] classNames(Object[] objects) {
+		string[] objectsCls;
+		for (Object o : objects)
+			objectsCls.add(o.className());
+		return objectsCls;
+	}
+
+}

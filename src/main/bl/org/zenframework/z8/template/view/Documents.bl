@@ -1,0 +1,97 @@
+import org.zenframework.z8.base.form.Listbox;
+import org.zenframework.z8.base.form.action.Action;
+import org.zenframework.z8.base.query.Query;
+import org.zenframework.z8.template.model.Document;
+import org.zenframework.z8.template.model.History;
+
+/* Атрибут [entry] указывает, что данное представление является пунктом меню приложения */
+[entry]
+
+/* Атрибут [request] указывает, что данное представление является запросом, к которому применяются права доступа */
+[request true]
+
+/* Атрибут [displayName] определяет имя, с которым представление Documents отображается в UI */
+[displayName "Документы"]
+
+/*
+ * Класс Documents описывает представление (UI) для таблицы Document
+ * Любое представление по умолчанию имеет два варианта отображения:
+ *    - таблица
+ *    - форма
+ * В режиме таблицы отображаются поля таблицы Document и ссылочных таблиц, перечисленные в массиве columns
+ * В режиме формы представление состоит из двух частей:
+ *    - левая (узкая) часть - список записей таблицы Document, перечень полей определяется массивом names
+ *    - правая (широкая) часть - форма для работы с записью, выбранной в левом списке
+ * Описываемая далее форма состоит из нескольких полей таблицы Document (и ссылочных таблиц),
+ * а также из списка записей истории изменения выбранного документа (таблица History).
+ * Форма, в соответствии с подходом разметки HTML-страницы bootstrap, условно состоит из нескольких столбцов,
+ * количество которых определяется значением свойства colCount. Каждый визуальный элемент формы по умолчанию
+ * занимает один столбец по ширине.
+ */
+public class Documents extends Document {
+
+	/* Action - действие над одной или несколькими выбранными записями */
+	/* Атрибут [icon] определяет иконку для кнопки действия из состава Font Awesome 4.7.0 (https://fontawesome.com/v4.7.0/icons/) */
+	[icon "fa-trash"]
+	/* Атрибут [displayName] определяет текст кнопки действия */
+	[displayName "Очистить историю"]
+	/* Базовый класс действия - Action. Для действий удобно определять inline-класс */
+	private Action clearHistory = class {
+		/* Метод execute(guid recordId, ...) определяет алгоритм, исполняемый действием */
+		virtual protected void execute(guid recordId, Query context, guid[] selected, Query query) {
+			// Действие clearHistory удаляет историю для текущего документа
+			// Параметр recordId - идентификатор выбранного документа. Если пользователь выбрал несколько документов,
+			// данный метод запустится для каждой выбранной записи
+			History history;
+			history.destroy(history.documentId == recordId);
+		}
+	};
+
+	/* Экземпляр таблицы History для вывода истории изменения документа */
+	public History history;
+	/* Свойство поля "editable" определяет возможность редактирования поля в таблицах и списках */
+	history.status.name.editable = true;
+	history.user.name.editable = true;
+	history.description.editable = true;
+
+	/*
+	 * Свойство визуального элемента "dependencies" определяет перечень визуальных элементов,
+	 * которые должны быть обновлены после изменения визуального элемента.
+	 * Далее указывается, что при изменении статуса (status.name) или ответственного пользователя (user.name)
+	 * необходимо обновить список записей истории изменения документа, т.к. в историю добавляется новая запись
+	 * ( см. Document.afterUpdate() )
+	 */
+	status.name.dependencies = { historyList };
+	user.name.dependencies = { historyList };
+
+	/* Атрибут [displayName] определяет имя, с которым список historyList отображается в UI */
+	[displayName "История"]
+	/* Список записей истории изменения текущего документа */
+	private Listbox historyList;
+	/* query - источник данных для списка, в данном случае это таблица History */
+	historyList.query = history;
+	/* link - ссылочное поле в источнике данных, по значению которого нужно отфильтровать записи источника */
+	historyList.link = history.documentId;
+	/* columns - массив полей, отображаемых в списке, каждое поле должно указываться ОБЯЗАТЕЛЬНО относительно источника, т.е. history */
+	historyList.columns = { history.createdAt, history.status.name, history.user.name, history.description };
+	/* colSpan - количество условных столбцов формы, которое компонент занимает по ширине */
+	historyList.colSpan = 4;
+	/* flex - если больше 0, компонент растягивается по вертикали и заполняет форму */
+	historyList.flex = 1;
+
+	/*
+	 * Атрибут [ui] определяет JavaScript-класс, изменяющий поведение визуального элемента по умолчанию
+	 * ( см. src/main/js/ui/control/EMail.js )
+	 */
+	[ui "org.zenframework.z8.template.controls.EMail"] email;
+
+	/* Массив names определяет перечень полей, отображаемых в левом списке в режиме формы */
+	names = { createdAt, fullName };
+	/* Массив controls определяет перечень визуальных элементов, отображаемых в правой части формы */
+	controls = { createdAt, name, doc, status.name, user.name, email, historyList };
+	/* Массив columns определяет перечень полей, отображаемых в режиме таблицы */
+	columns = { createdAt, name, doc, status.name, user.name };
+
+	/* Массив действий, доступных в визуальном интерфейсе */
+	actions = { clearHistory };
+}
