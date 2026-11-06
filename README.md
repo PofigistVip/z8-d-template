@@ -7,16 +7,17 @@
 ## Сборка
 
 Нужны Python 3, DMD, DUB, C-компилятор, клиентские библиотеки PostgreSQL,
-собранный `z8d`, исходные деревья `z8-d` и `org.zenframework.z8`. Последнее
-пока используется для стандартной BL-библиотеки и ресурсов веб-клиента.
+собранный `z8d` и исходное дерево `z8-d`. Стандартные BL и ресурсы веб-клиента
+берутся из `z8-d/vendor/z8`; исходный Java-проект для сборки не требуется.
 
 В PowerShell из каталога шаблона:
 
 ```powershell
-python build.py --z8-d C:/path/to/z8-d --original-z8 C:/path/to/org.zenframework.z8 --postgres-bin 'C:/Program Files/PostgreSQL/15/bin'
+python build.py --z8-d C:/path/to/z8-d --postgres-bin 'C:/Program Files/PostgreSQL/15/bin'
 ```
 
-Вместо первых двух параметров можно установить `Z8_D_ROOT` и `Z8_ORIGINAL_ROOT`.
+Вместо параметра `--z8-d` можно установить `Z8_D_ROOT`. Для совместимости
+`--original-z8` позволяет явно выбрать другое дерево исходных BL и web-ресурсов.
 Каталог PostgreSQL определяется через `--postgres-bin`, `Z8_PG_BIN` или
 `pg_config`. Сборка создаёт `build/z8-template.exe` (в Unix — `build/z8-template`),
 клиент в `build/public` и сгенерированные D-модули в `build/generated`.
@@ -70,6 +71,10 @@ WHERE "RecordId" = '00000000-0000-0000-0000-000000000002'`. Используйт
 ```powershell
 python tests/e2e.py --z8-d C:/path/to/z8-d --postgres-bin 'C:/Program Files/PostgreSQL/15/bin'
 ```
+
+Сборку и те же сценарии без обращения к исходному Java-проекту можно проверить
+во временной копии шаблона командой `python tests/build_without_original.py`
+с теми же параметрами `--z8-d` и `--postgres-bin`.
 
 Реализация `z8-d` и совместимость всех функций исходного шаблона ещё развиваются;
 успешная сборка сама по себе не подтверждает полную эквивалентность.

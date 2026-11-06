@@ -12,16 +12,17 @@ import tempfile
 project = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--z8-d", type=Path, default=os.environ.get("Z8_D_ROOT"), required=not os.environ.get("Z8_D_ROOT"), help="Path to the z8-d checkout")
-parser.add_argument("--original-z8", type=Path, default=os.environ.get("Z8_ORIGINAL_ROOT"), required=not os.environ.get("Z8_ORIGINAL_ROOT"), help="Path to the original org.zenframework.z8 checkout")
+parser.add_argument("--original-z8", type=Path, help="Optional legacy override for the bundled Z8 sources")
 parser.add_argument("--postgres-bin", type=Path, help="PostgreSQL bin directory (or set Z8_PG_BIN)")
 parser.add_argument("--core-library", type=Path, help="Use an existing compiled Z8 core library")
 parser.add_argument("--library", type=Path, action="append", default=[], help="Additional compiled BL library (repeatable)")
 options = parser.parse_args()
-root, original = options.z8_d.resolve(), options.original_z8.resolve()
+root = options.z8_d.resolve()
+original = options.original_z8.resolve() if options.original_z8 else root / "vendor/z8"
 language = original / "org.zenframework.z8.lang/src/bl"
 compiler = root / ("z8d.exe" if os.name == "nt" else "z8d")
 if not language.is_dir() or not (root / "runtime/source/z8/runtime.d").is_file():
-    raise SystemExit("Check the paths to z8-d and the original Z8 checkout")
+    raise SystemExit("Check the z8-d path and bundled BL sources")
 if not compiler.is_file():
     raise SystemExit("Build the compiler first: dub build --compiler=dmd in z8-d")
 pg_bin = options.postgres_bin or (Path(os.environ["Z8_PG_BIN"]) if os.environ.get("Z8_PG_BIN") else None)
