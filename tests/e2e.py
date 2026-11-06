@@ -273,6 +273,14 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status != 200 or not json.loads(body).get("success"), body
         relogin = request(request="login", login="TemplateUser", password="new-user-test")
         assert relogin["user"]["login"] == "TemplateUser", relogin
+        renewed_session = relogin["session"]
+        temporary_file = request(request=mine, session=renewed_session, action="export", format="doc",
+                                 columns='[{"id":"name"}]')["info"]["files"][0]
+        request(request="logout", session=renewed_session)
+        status, _ = http_request("/request.json?" + urlencode({"request": mine, "session": renewed_session, "action": "read"}))
+        assert status != 200, "Logged-out session was still authorized"
+        status, _ = http_request("/" + quote(temporary_file["path"], safe="/") + "?" + urlencode({"session": renewed_session}))
+        assert status != 200, "Logged-out session downloaded a generated file"
 
         params = {"request": documents, "session": session, "action": "attach", "field": "doc",
                   "recordId": record, "fields": '["name","doc"]'}
