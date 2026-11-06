@@ -3,11 +3,14 @@ from pathlib import Path
 import argparse
 import http.client
 import hashlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 
 project = Path(__file__).resolve().parents[1]
@@ -95,7 +98,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         choices = request(request=documents, session=session, action="read", query="status",
                           fields='["status.name"]', values=json.dumps(selector_values))
         assert len(choices["data"]) >= 3, choices
-        request(request=documents, session=session, action="create", fields='["name"]', data='[{"name":"Other"}]')
+        request(request=documents, session=session, action="create", fields='["name"]', data=json.dumps([{"name": "Другой <&>"}]))
         request(request=documents, session=session, action="update", fields='["name","statusId","userId"]',
                 data=json.dumps([{"recordId": record, "statusId": "BA82DA79-E026-4DE2-AA41-7C5E0A821320",
                                   "status.name": "Новый", "user.name": "Admin",
@@ -134,6 +137,32 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         rows = request(request=mine, session=session, action="read", fields='["name","statusId","userId"]')["data"]
         assert [row["recordId"] for row in rows] == [record], rows
 
+        def export(session, view, **extra):
+            result = request(request=view, session=session, action="export", format="xls",
+                             columns=json.dumps([{"id": "name", "width": 150, "minWidth": 50}]), **extra)
+            file = result["info"]["files"][0]
+            assert file["name"].endswith(".xlsx"), file
+            status, content = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session}))
+            assert status == 200, (status, content)
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            return [[text.text or "" for text in row.findall(".//s:t", ns)]
+                    for row in root.findall(".//s:row", ns)]
+
+        exported = export(session, documents, where=json.dumps({"property": "name", "value": "First"}))
+        assert len(exported) == 2 and exported[1] == ["First"], exported
+        exported = export(session, documents)
+        assert {tuple(row) for row in exported[1:]} == {("First",), ("Другой <&>",)}, exported
+        nested = request(request=documents, session=session, action="export", format="xls", query="history",
+                         columns=json.dumps([{"id": "history.description", "width": 150, "minWidth": 50}]),
+                         where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
+                                           {"property": "history.documentId", "value": record}]))
+        assert nested["info"]["files"][0]["name"] == "export.xlsx", nested
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session,
+                                    "action": "export", "format": "pdf", "columns": '[{"id":"name"}]'}))
+        assert not json.loads(body).get("success"), body
+
         # The original schema generator grants the User role access to
         # MyDocuments but denies access to the administrator's Documents view.
         users = "org.zenframework.z8.server.base.table.system.view.UsersView"
@@ -156,6 +185,10 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         request(request=mine, session=user_session, action="update", fields='["name","userId"]',
                 data=json.dumps([{"recordId": own, "userId": user_id, "user.name": "TemplateUser"}]))
         assert [row["recordId"] for row in request(request=mine, session=user_session, action="read", fields='["name"]')["data"]] == [own]
+        exported = export(user_session, mine)
+        assert len(exported) == 2 and exported[1] == ["Own document"], exported
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "xls", "columns": '[{"id":"name"}]'}))
+        assert not json.loads(body).get("success"), body
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "meta"}))
         denied = json.loads(body)
         assert not denied.get("success"), (status, denied)
