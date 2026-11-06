@@ -276,6 +276,10 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and "<td>First</td>" in html, html
         assert "<td>Другой &lt;&amp;&gt;</td>" in html, html
         assert "<td>Другой <&></td>" not in html, html
+        html_url = "/" + quote(html_file["path"], safe="/") + "?" + urlencode({"session": session, "preview": "true"})
+        status, headers, preview = http_request(html_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "text/html; charset=UTF-8" and preview == content, headers
+        assert "sandbox" in headers.get("Content-Security-Policy", "") and headers.get("X-Content-Type-Options") == "nosniff", headers
 
         # The original schema generator grants the User role access to
         # MyDocuments but denies access to the administrator's Documents view.
@@ -388,6 +392,29 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
             assert status == 200 and headers.get("Content-Type") == "application/pdf" and preview.startswith(b"%PDF-"), (status, headers)
             request(request=documents, session=session, action="detach", field="doc", recordId=record,
                     fields='["name","doc"]', data=json.dumps([email_file["id"]]))
+        video_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
+                              for key, value in params.items())
+        video_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="movie.MP4"\r\n'
+                       'Content-Type: video/mp4\r\n\r\n').encode() + b"test video" + f'\r\n--{boundary}--\r\n'.encode()
+        status, body = http_request("/request.json", "POST", video_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        attached_video = json.loads(body)
+        assert status == 200 and attached_video["success"], attached_video
+        video_file = json.loads(attached_video["data"][0]["doc"])[0]
+        video_url = "/" + quote(video_file["path"], safe="/") + "?" + urlencode({"session": session, "id": video_file["id"], "preview": "true"})
+        status, headers, preview = http_request(video_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "video/mp4" and preview == b"test video", (status, headers)
+        request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                fields='["name","doc"]', data=json.dumps([video_file["id"]]))
+        unknown_body = video_body.replace(b"movie.MP4", b"file.unknown")
+        status, body = http_request("/request.json", "POST", unknown_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        unknown_attachment = json.loads(body)
+        assert status == 200 and unknown_attachment["success"], unknown_attachment
+        unknown_file = json.loads(unknown_attachment["data"][0]["doc"])[0]
+        unknown_url = "/" + quote(unknown_file["path"], safe="/") + "?" + urlencode({"session": session, "id": unknown_file["id"], "preview": "true"})
+        status, headers, preview = http_request(unknown_url, include_headers=True)
+        assert status == 200 and headers.get("Content-Type") == "text/plain; charset=UTF-8" and preview == b"test video", (status, headers)
+        request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                fields='["name","doc"]', data=json.dumps([unknown_file["id"]]))
         pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
                             for key, value in params.items())
         pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
