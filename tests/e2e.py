@@ -204,9 +204,21 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert "First" in text and "Другой <&>" in text, text
         if os.environ.get("Z8_TEST_PDF"):
             Path(os.environ["Z8_TEST_PDF"]).write_bytes(pdf_bytes)
-        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session,
-                                    "action": "export", "format": "doc", "columns": '[{"id":"name"}]'}))
-        assert not json.loads(body).get("success"), body
+        for word_format in ("doc", "docx"):
+            word_filter = {} if word_format == "doc" else {"where": json.dumps({"property": "name", "value": "First"})}
+            word = request(request=documents, session=session, action="export", format=word_format,
+                           columns='[{"id":"name"}]', **word_filter)["info"]["files"][0]
+            assert word["name"] == "export.docx", word
+            status, content = http_request("/" + quote(word["path"], safe="/") + "?" + urlencode({"session": session}))
+            assert status == 200, status
+            if word_format == "doc" and os.environ.get("Z8_TEST_DOCX"):
+                Path(os.environ["Z8_TEST_DOCX"]).write_bytes(content)
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                doc = ET.fromstring(archive.read("word/document.xml"))
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            rows = [[text.text or "" for text in row.findall(".//w:t", ns)] for row in doc.findall(".//w:tr", ns)]
+            expected = {("First",), ("Другой <&>",)} if word_format == "doc" else {("First",)}
+            assert {tuple(row) for row in rows[1:]} == expected, rows
 
         # The original schema generator grants the User role access to
         # MyDocuments but denies access to the administrator's Documents view.
@@ -235,6 +247,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         exported = export(user_session, mine)
         assert len(exported) == 2 and exported[1] == ["Own document"], exported
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "xls", "columns": '[{"id":"name"}]'}))
+        assert not json.loads(body).get("success"), body
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "doc", "columns": '[{"id":"name"}]'}))
         assert not json.loads(body).get("success"), body
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "meta"}))
         denied = json.loads(body)
