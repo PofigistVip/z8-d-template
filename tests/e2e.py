@@ -200,7 +200,13 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                            columns='[{"id":"name"}]', options=json.dumps({"pageFormat": "A5", "pageOrientation": "portrait", "leftMargin": 5}))["info"]["files"][0]
         status, portrait_bytes = http_request("/" + quote(portrait["path"], safe="/") + "?" + urlencode({"session": session}))
         assert status == 200 and b"/MediaBox [0 0 420 595]" in portrait_bytes and b"q 14 " in portrait_bytes, status
-        for options in ({"pageOrientation": "diagonal"}, {"pageFormat": "unknown"}, {"leftMargin": 9999}):
+        bottom = request(request=documents, session=session, action="export", format="pdf", columns='[{"id":"name"}]',
+                         options=json.dumps({"detailRowHeight": "10mm", "detailVertAlign": "bottom"}))["info"]["files"][0]
+        status, bottom_pdf = http_request("/" + quote(bottom["path"], safe="/") + "?" + urlencode({"session": session}))
+        positions = re.findall(rb"q (\d+) (\d+) \d+ 28 re W n BT /F1 9 Tf \d+ (\d+) Td", bottom_pdf)
+        assert status == 200 and positions and all(int(baseline) - int(y) == 3 for _, y, baseline in positions), positions
+        for options in ({"pageOrientation": "diagonal"}, {"pageFormat": "unknown"}, {"leftMargin": 9999},
+                        {"detailVertAlign": "sideways"}, {"detailRowHeight": "5bogus"}):
             status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session, "action": "export",
                                         "format": "pdf", "columns": '[{"id":"name"}]', "options": json.dumps(options)}))
             assert not json.loads(body).get("success"), body
@@ -337,6 +343,12 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                             columns='[{"id":"name"}]')["info"]["files"][0]
         status, content = http_request("/" + quote(multipage["path"], safe="/") + "?" + urlencode({"session": session}))
         assert status == 200 and b"/Count 2 /Kids" in content, (status, content[:100])
+        tall = request(request=documents, session=session, action="export", format="pdf", columns='[{"id":"name"}]',
+                       options=json.dumps({"detailRowHeight": "36pt", "detailVertAlign": "top"}))["info"]["files"][0]
+        status, tall_pdf = http_request("/" + quote(tall["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200 and b"/Count 4 /Kids" in tall_pdf, (status, tall_pdf[:100])
+        positions = re.findall(rb"q (\d+) (\d+) \d+ 36 re W n BT /F1 9 Tf \d+ (\d+) Td", tall_pdf)
+        assert positions and all(int(baseline) - int(y) == 24 for _, y, baseline in positions), positions
         assert len(export(session, documents)) == 49  # 48 records plus the header
     finally:
         if server.poll() is None:

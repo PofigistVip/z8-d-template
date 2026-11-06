@@ -87,7 +87,8 @@ python tests/e2e.py --z8-d C:/path/to/z8-d --postgres-bin 'C:/Program Files/Post
 Форматы запроса `doc` и `docx` формируют документ Word `.docx`.
 Формат `html` создаёт отдельный HTML-файл с таблицей данных.
 PDF создаётся со шрифтом Roboto из оригинального Z8 и поддерживает кириллицу;
-параметр `options` позволяет задать `pageFormat`, `pageOrientation` и поля в миллиметрах.
+параметр `options` позволяет задать `pageFormat`, `pageOrientation` и поля в миллиметрах; `detailRowHeight` и `detailVertAlign`
+задают высоту и выравнивание строк.
 Широкие значения обрезаются по границам столбцов. Оформление отчётов BIRT
 пока не воспроизводится.
 
