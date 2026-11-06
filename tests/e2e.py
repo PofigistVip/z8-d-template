@@ -265,6 +265,15 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         denied = json.loads(body)
         assert not denied.get("success"), (status, denied)
 
+        status, body = http_request("/request.json?" + urlencode({"request": "login", "session": user_session,
+                                    "password": "wrong", "newPassword": "new-user-test"}))
+        assert not json.loads(body).get("success"), body
+        request(request="login", session=user_session, password="user-test", newPassword="new-user-test")
+        status, body = http_request("/request.json?" + urlencode({"request": "login", "login": "TemplateUser", "password": "user-test"}))
+        assert status != 200 or not json.loads(body).get("success"), body
+        relogin = request(request="login", login="TemplateUser", password="new-user-test")
+        assert relogin["user"]["login"] == "TemplateUser", relogin
+
         params = {"request": documents, "session": session, "action": "attach", "field": "doc",
                   "recordId": record, "fields": '["name","doc"]'}
         boundary = "z8-template-test"
