@@ -70,6 +70,14 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and b"z8-template.js" in index
         status, script = http_request("/z8-template.js")
         assert status == 200 and b"org.zenframework.z8.template.controls.EMail" in script
+        for source in (project / "src/main/js").rglob("*.js"):
+            assert source.read_bytes() in script, source
+        status, debug_index = http_request("/debug.html")
+        assert status == 200 and b"debug/z8-template.js" in debug_index
+        status, debug_script = http_request("/debug/z8-template.js")
+        assert status == 200 and debug_script == script
+        status, debug_css = http_request("/debug/css/z8-template.css")
+        assert status == 200 and debug_css
         login = request(request="login", login="Admin", password="template-test")
         assert {documents, mine} <= {entry["request"] for entry in login["user"]["entries"]}
         session = login["session"]

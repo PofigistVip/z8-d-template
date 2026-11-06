@@ -80,6 +80,14 @@ with tempfile.TemporaryDirectory() as directory:
         (public / target).write_bytes(content)
     index = (project / "src/main/html/index.html").read_bytes()
     (public / "index.html").write_bytes(index.replace(b"${project.name}", b"z8-template"))
+    debug = public / "debug"
+    (debug / "css").mkdir(parents=True)
+    shutil.copyfile(public / "z8-template.js", debug / "z8-template.js")
+    shutil.copyfile(public / "css/z8-template.css", debug / "css/z8-template.css")
+    for name in ("fonts", "img"):
+        shutil.copytree(public / "css" / name, debug / "css" / name)
+    index = (project / "src/main/html/debug.html").read_bytes()
+    (public / "debug.html").write_bytes(index.replace(b"${project.name}", b"z8-template"))
     destination = project / "build/public"
     if destination.exists():
         shutil.rmtree(destination)
