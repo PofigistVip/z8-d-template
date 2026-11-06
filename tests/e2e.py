@@ -371,6 +371,23 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert json.loads(detached["data"][0]["doc"]) == [], detached
         status, contents = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"]}))
         assert status != 200, (status, contents)
+        if office_home:
+            email_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
+                                  for key, value in params.items())
+            email_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="message.eml"\r\n'
+                           'Content-Type: message/rfc822\r\n\r\n'
+                           'From: sender@example.com\r\nSubject: Template email\r\n'
+                           'Content-Type: text/plain; charset=UTF-8\r\n\r\nHello from email\r\n').encode()
+            email_body += f'\r\n--{boundary}--\r\n'.encode()
+            status, body = http_request("/request.json", "POST", email_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            attached_email = json.loads(body)
+            assert status == 200 and attached_email["success"], attached_email
+            email_file = json.loads(attached_email["data"][0]["doc"])[0]
+            email_url = "/" + quote(email_file["path"], safe="/") + "?" + urlencode({"session": session, "id": email_file["id"], "preview": "true"})
+            status, headers, preview = http_request(email_url, include_headers=True)
+            assert status == 200 and headers.get("Content-Type") == "application/pdf" and preview.startswith(b"%PDF-"), (status, headers)
+            request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                    fields='["name","doc"]', data=json.dumps([email_file["id"]]))
         pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
                             for key, value in params.items())
         pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="document.pdf"\r\n'
