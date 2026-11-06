@@ -220,6 +220,15 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
             expected = {("First",), ("Другой <&>",)} if word_format == "doc" else {("First",)}
             assert {tuple(row) for row in rows[1:]} == expected, rows
 
+        html_file = request(request=documents, session=session, action="export", format="html",
+                            columns='[{"id":"missing"},{"id":"name"}]')["info"]["files"][0]
+        assert html_file["name"] == "export.html", html_file
+        status, content = http_request("/" + quote(html_file["path"], safe="/") + "?" + urlencode({"session": session}))
+        html = content.decode("utf-8")
+        assert status == 200 and "<td>First</td>" in html, html
+        assert "<td>Другой &lt;&amp;&gt;</td>" in html, html
+        assert "<td>Другой <&></td>" not in html, html
+
         # The original schema generator grants the User role access to
         # MyDocuments but denies access to the administrator's Documents view.
         users = "org.zenframework.z8.server.base.table.system.view.UsersView"
@@ -249,6 +258,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "xls", "columns": '[{"id":"name"}]'}))
         assert not json.loads(body).get("success"), body
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "doc", "columns": '[{"id":"name"}]'}))
+        assert not json.loads(body).get("success"), body
+        status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "html", "columns": '[{"id":"name"}]'}))
         assert not json.loads(body).get("success"), body
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "meta"}))
         denied = json.loads(body)
