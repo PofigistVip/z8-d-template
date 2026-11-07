@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,9 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
     settings = "web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n"
     if os.environ.get("Z8_TEST_FILES_ON_DISK") == "1":
         settings += "files.saveOnDisk=true\n"
+    pdfinfo = os.environ.get("Z8_TEST_PDFINFO") or shutil.which("pdfinfo")
+    if pdfinfo:
+        settings += "pdf.info.executable=" + Path(pdfinfo).resolve().as_posix() + "\n"
     office_home = os.environ.get("Z8_TEST_OFFICE_HOME")
     if office_home:
         settings += "office.home=" + Path(office_home).resolve().as_posix() + "\n"
@@ -429,8 +433,26 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         unknown_url = "/" + quote(unknown_file["path"], safe="/") + "?" + urlencode({"session": session, "id": unknown_file["id"], "preview": "true"})
         status, headers, preview = http_request(unknown_url, include_headers=True)
         assert status == 200 and headers.get("Content-Type") == "text/plain; charset=UTF-8" and preview == b"test video", (status, headers)
+        comment = request(request=documents, session=session, action="preview", field="doc", recordId=record)
+        status, comment_pdf = http_request("/" + quote(comment["source"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200 and comment_pdf.startswith(b"%PDF-"), (status, comment_pdf[:100])
+        assert "file.unknown" in pdf_text(comment_pdf), pdf_text(comment_pdf)
         request(request=documents, session=session, action="detach", field="doc", recordId=record,
                 fields='["name","doc"]', data=json.dumps([unknown_file["id"]]))
+        if pdfinfo:
+            pdf_body = b"".join((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode()
+                                for key, value in params.items())
+            pdf_body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="report.pdf"\r\n'
+                         'Content-Type: application/pdf\r\n\r\n').encode() + pdf_bytes + f'\r\n--{boundary}--\r\n'.encode()
+            status, body = http_request("/request.json", "POST", pdf_body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+            pdf_attachment = json.loads(body)
+            assert status == 200 and pdf_attachment["success"], pdf_attachment
+            uploaded_pdf = json.loads(pdf_attachment["data"][0]["doc"])[0]
+            generated = request(request=documents, session=session, action="preview", field="doc", recordId=record)
+            status, content = http_request("/" + quote(generated["source"], safe="/") + "?" + urlencode({"session": session}))
+            assert status == 200 and content == pdf_bytes, (status, len(content))
+            request(request=documents, session=session, action="detach", field="doc", recordId=record,
+                    fields='["name","doc"]', data=json.dumps([uploaded_pdf["id"]]))
         encoding_cases = [("unicode-le.unknown", "Привет".encode("utf-16"), "text/plain; charset=UTF-16LE"),
                           ("unicode-be.unknown", b"\xfe\xff" + "Привет".encode("utf-16-be"), "text/plain; charset=UTF-16BE"),
                           ("unicode32.unknown", b"\x00\x00\xfe\xff" + "Привет".encode("utf-32-be"), "text/plain; charset=UTF-32BE"),

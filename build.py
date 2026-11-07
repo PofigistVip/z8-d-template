@@ -164,6 +164,19 @@ with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
     if openxlsx_shared is not None:
         deploy_openxlsx(openxlsx_shared, output)
 
+    # Keep the original server localization bundles beside the executable.
+    # Application-specific bundles in the configuration root take precedence.
+    framework_resources = original / "org.zenframework.z8.server/WEB-INF/resources"
+    if not framework_resources.is_dir():
+        raise SystemExit("The Z8 server localization resources were not found")
+    resource_output = build_root / "resources"
+    if resource_output.is_symlink() or (resource_output.exists() and not resource_output.is_dir()):
+        raise SystemExit("The resource output must be a directory inside the build directory")
+    resource_output.mkdir(exist_ok=True)
+    for resource in sorted(framework_resources.glob("*.nls")):
+        if resource.is_file():
+            shutil.copyfile(resource, resource_output / resource.name)
+
     public = temp / "public"
     assemble(original, public)
     for folder, base_name, target in (("js", "revolt.js", "z8-template.js"),
