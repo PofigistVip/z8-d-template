@@ -37,6 +37,8 @@ if os.name == "nt" and not (pg_bin.parent / "lib/libpq.lib").is_file():
 sys.path.insert(0, str(root / "webserver"))
 from build_civetweb import build
 from prepare_client import assemble
+sys.path.insert(0, str(root / "ldap"))
+from dub_package import source as ldap_package_source
 sys.path.insert(0, str(root / "xlsx"))
 from build_support import link_args as openxlsx_link_args, deploy as deploy_openxlsx
 openxlsx_args, openxlsx_shared = (openxlsx_link_args(root, options.openxlsx_dir)
@@ -152,7 +154,9 @@ with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
             str(runtime), "-of=" + str(output)]
     args += [str(pg_bin.parent / "lib/libpq.lib")] if os.name == "nt" else ["-L-lpq", "-L-lpthread", "-L-ldl"]
     if os.name == "nt":
-        args += ["-I" + str(root / "ldap/source"), str(root / "ldap/source/z8/ldap/windows.d")]
+        package = ldap_package_source(root)
+        args += ["-I" + str(root / "ldap/source"), "-I" + str(package.parent),
+                 str(root / "ldap/source/z8/ldap/windows.d"), str(package)]
     args += openxlsx_args
     response = temp / "dmd.rsp"
     response.write_text("\n".join('"' + arg.replace('\\', '/') + '"' for arg in args), encoding="utf-8")
