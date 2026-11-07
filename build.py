@@ -146,6 +146,8 @@ with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
             *(str(library / ("z8-library.lib" if os.name == "nt" else "libz8-library.a")) for library in link_order(libraries)),
             str(runtime), "-of=" + str(output)]
     args += [str(pg_bin.parent / "lib/libpq.lib")] if os.name == "nt" else ["-L-lpq", "-L-lpthread", "-L-ldl"]
+    if os.name == "nt":
+        args += ["-I" + str(root / "ldap/source"), str(root / "ldap/source/z8/ldap/windows.d")]
     response = temp / "dmd.rsp"
     response.write_text("\n".join('"' + arg.replace('\\', '/') + '"' for arg in args), encoding="utf-8")
     subprocess.run(["dmd", "@" + str(response)], cwd=temp, check=True)
