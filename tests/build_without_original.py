@@ -47,5 +47,5 @@ with tempfile.TemporaryDirectory() as directory:
                                 env=env, capture_output=True, text=True)
         output = failed.stdout + failed.stderr
         assert failed.returncode and "LDAP timeout and page size must be nonnegative" in output, (failed.returncode, output)
-    subprocess.run([sys.executable, str(stage / "tests/e2e.py"), "--z8-d", str(root), "--postgres-bin", str(pg)], env=env, check=True)
+    subprocess.run([sys.executable, str(stage / "tests/e2e.py"), "--z8-d", str(root), "--postgres-bin", str(pg)] + (["--openxlsx"] if options.openxlsx_dir else []), env=env, check=True)
 print("Template built and ran without an original Z8 checkout")

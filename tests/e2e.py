@@ -21,6 +21,7 @@ project = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--z8-d", type=Path, default=os.environ.get("Z8_D_ROOT"), required=not os.environ.get("Z8_D_ROOT"))
 parser.add_argument("--postgres-bin", type=Path)
+parser.add_argument("--openxlsx", action="store_true", help="Expect XLSX export to be enabled")
 args = parser.parse_args()
 sys.path.insert(0, str(args.z8_d.resolve() / "tests"))
 from postgres_support import postgres_bin, temporary_postgres
@@ -185,43 +186,53 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         rows = request(request=mine, session=session, action="read", fields='["name","statusId","userId"]')["data"]
         assert [row["recordId"] for row in rows] == [record], rows
 
-        def export(session, view, **extra):
-            result = request(request=view, session=session, action="export", format="xls",
-                             columns=json.dumps([{"id": "name", "width": 150, "minWidth": 50}]), **extra)
-            file = result["info"]["files"][0]
-            assert file["name"].endswith(".xlsx"), file
-            status, content = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session}))
-            assert status == 200, (status, content)
-            with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
-            ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-            column = root.find(".//s:col", ns)
-            assert column is not None and column.get("customWidth") == "1" and 28 < float(column.get("width")) < 29, ET.tostring(root)
-            return [[text.text or "" for text in row.findall(".//s:t", ns)]
-                    for row in root.findall(".//s:row", ns)]
+        if args.openxlsx:
+            def export(session, view, **extra):
+                result = request(request=view, session=session, action="export", format="xls",
+                                 columns=json.dumps([{"id": "name", "width": 150, "minWidth": 50}]), **extra)
+                file = result["info"]["files"][0]
+                assert file["name"].endswith(".xlsx"), file
+                status, content = http_request("/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session}))
+                assert status == 200, (status, content)
+                ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+                    strings = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                shared = ["".join(node.text or "" for node in item.findall(".//s:t", ns))
+                          for item in strings.findall("s:si", ns)]
+                column = root.find(".//s:col", ns)
+                assert column is not None and column.get("customWidth") == "1" and 28 < float(column.get("width")) < 29, ET.tostring(root)
+                return [[shared[int(cell.find("s:v", ns).text)] if cell.get("t") == "s" else
+                         "".join(node.text or "" for node in cell.findall(".//s:t", ns))
+                         for cell in row.findall("s:c", ns)] for row in root.findall(".//s:row", ns)]
 
-        exported = export(session, documents, where=json.dumps({"property": "name", "value": "First"}))
-        assert len(exported) == 2 and exported[1] == ["First"], exported
-        if office_home:
-            generated_file = request(request=documents, session=session, action="export", format="xls",
-                                columns='[{"id":"name"}]')["info"]["files"][0]
-            generated_preview = "/" + quote(generated_file["path"], safe="/") + "?" + urlencode({"session": session, "preview": "true"})
-            status, headers, content = http_request(generated_preview, include_headers=True)
-            assert status == 200 and headers.get("Content-Type") == "application/pdf" and content.startswith(b"%PDF-"), (status, headers)
-        exported = export(session, documents)
-        assert {tuple(row) for row in exported[1:]} == {("First",), ("Другой <&>",)}, exported
-        nested = request(request=documents, session=session, action="export", format="xls", query="history",
-                         columns=json.dumps([{"id": field, "width": 150, "minWidth": 50}
-                                             for field in ("history.createdAt", "history.status.name", "history.user.name")]),
-                         where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
-                                           {"property": "history.documentId", "value": record}]),
-                         values=json.dumps(selector_values))
-        assert nested["info"]["files"][0]["name"] == "export.xlsx", nested
-        status, nested_content = http_request("/" + quote(nested["info"]["files"][0]["path"], safe="/") + "?" + urlencode({"session": session}))
-        assert status == 200, status
-        with zipfile.ZipFile(io.BytesIO(nested_content)) as archive:
-            nested_sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
-        assert len([item for item in nested_sheet.iter() if item.tag.endswith("}row")]) == 3
+            exported = export(session, documents, where=json.dumps({"property": "name", "value": "First"}))
+            assert len(exported) == 2 and exported[1] == ["First"], exported
+            if office_home:
+                generated_file = request(request=documents, session=session, action="export", format="xls",
+                                    columns='[{"id":"name"}]')["info"]["files"][0]
+                generated_preview = "/" + quote(generated_file["path"], safe="/") + "?" + urlencode({"session": session, "preview": "true"})
+                status, headers, content = http_request(generated_preview, include_headers=True)
+                assert status == 200 and headers.get("Content-Type") == "application/pdf" and content.startswith(b"%PDF-"), (status, headers)
+            exported = export(session, documents)
+            assert {tuple(row) for row in exported[1:]} == {("First",), ("Другой <&>",)}, exported
+            nested = request(request=documents, session=session, action="export", format="xls", query="history",
+                             columns=json.dumps([{"id": field, "width": 150, "minWidth": 50}
+                                                 for field in ("history.createdAt", "history.status.name", "history.user.name")]),
+                             where=json.dumps([{"value": "BA82DA79-E026-4DE2-AA41-7C5E0A821320"},
+                                               {"property": "history.documentId", "value": record}]),
+                             values=json.dumps(selector_values))
+            assert nested["info"]["files"][0]["name"] == "export.xlsx", nested
+            status, nested_content = http_request("/" + quote(nested["info"]["files"][0]["path"], safe="/") + "?" + urlencode({"session": session}))
+            assert status == 200, status
+            with zipfile.ZipFile(io.BytesIO(nested_content)) as archive:
+                nested_sheet = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+            assert len([item for item in nested_sheet.iter() if item.tag.endswith("}row")]) == 3
+        else:
+            status, body = http_request("/request.json?" + urlencode({"request": documents, "session": session,
+                "action": "export", "format": "xlsx", "columns": '[{"id":"name"}]'}))
+            response = json.loads(body)
+            assert status == 200 and not response.get("success") and "OpenXLSX provider" in response["info"]["messages"][-1]["text"], response
         pdf = request(request=documents, session=session, action="export", format="pdf",
                       columns='[{"id":"name","width":150,"minWidth":50}]')["info"]["files"][0]
         assert pdf["name"] == "export.pdf", pdf
@@ -325,8 +336,9 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         request(request=mine, session=user_session, action="update", fields='["name","userId"]',
                 data=json.dumps([{"recordId": own, "userId": user_id, "user.name": "TemplateUser"}]))
         assert [row["recordId"] for row in request(request=mine, session=user_session, action="read", fields='["name"]')["data"]] == [own]
-        exported = export(user_session, mine)
-        assert len(exported) == 2 and exported[1] == ["Own document"], exported
+        if args.openxlsx:
+            exported = export(user_session, mine)
+            assert len(exported) == 2 and exported[1] == ["Own document"], exported
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "xls", "columns": '[{"id":"name"}]'}))
         assert not json.loads(body).get("success"), body
         status, body = http_request("/request.json?" + urlencode({"request": documents, "session": user_session, "action": "export", "format": "doc", "columns": '[{"id":"name"}]'}))
@@ -371,7 +383,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
             preview_url = "/" + quote(file["path"], safe="/") + "?" + urlencode({"session": session, "id": file["id"], "preview": "true"})
             status, headers, preview = http_request(preview_url, include_headers=True)
             assert status == 200 and headers.get("Content-Type") == "application/pdf" and preview.startswith(b"%PDF-"), (status, headers)
-        for format in ("xls", "pdf", "doc", "html"):
+        for format in (("xls",) if args.openxlsx else ()) + ("pdf", "doc", "html"):
             exported = request(request=documents, session=session, action="export", format=format,
                                columns='[{"id":"name"},{"id":"createdAt"},{"id":"doc"}]',
                                where=json.dumps({"property": "name", "value": "First"}))["info"]["files"][0]
@@ -379,7 +391,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
             assert status == 200, status
             if format == "xls":
                 with zipfile.ZipFile(io.BytesIO(content)) as archive:
-                    root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+                    root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
                 texts = " ".join(item.text or "" for item in root.iter() if item.tag.endswith("}t"))
             elif format == "pdf":
                 texts = pdf_text(content)
@@ -536,7 +548,8 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and b"/Count 4 /Kids" in tall_pdf, (status, tall_pdf[:100])
         positions = re.findall(rb"q (\d+) (\d+) \d+ 36 re W n BT /F1 9 Tf \d+ (\d+) Td", tall_pdf)
         assert positions and all(int(baseline) - int(y) == 24 for _, y, baseline in positions), positions
-        assert len(export(session, documents)) == 49  # 48 records plus the header
+        if args.openxlsx:
+            assert len(export(session, documents)) == 49  # 48 records plus the header
     finally:
         if server.poll() is None:
             server.stdin.write("\n")
