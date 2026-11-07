@@ -107,6 +107,18 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         login = request(request="login", login="Admin", password="template-test")
         assert {documents, mine} <= {entry["request"] for entry in login["user"]["entries"]}
         session = login["session"]
+        system_tables = "org.zenframework.z8.server.base.table.system.view.TablesView"
+        system_meta = request(request=system_tables, session=session, action="meta")
+        report = next(item for item in system_meta["reports"] if item["text"] == "LibreOffice (*.odt)")
+        generated_report = request(request=system_tables, session=session, action="report", id=report["id"])
+        report_file = generated_report["info"]["files"][0]
+        assert report_file["name"].endswith(".odt"), report_file
+        status, report_data = http_request("/" + quote(report_file["path"], safe="/") + "?" + urlencode({"session": session}))
+        assert status == 200, (status, report_data)
+        with zipfile.ZipFile(io.BytesIO(report_data)) as report_zip:
+            assert report_zip.testzip() is None
+            report_text = "".join(ET.fromstring(report_zip.read("content.xml")).itertext())
+            assert "Tmp Documents" in report_text and "org.zenframework.z8.template.model.Document" in report_text, report_text
         metadata = request(request=documents, session=session, action="meta")
         assert [item["name"] for item in metadata["controls"]] == ["createdAt", "name", "doc", "status.name", "user.name", "email", "historyList"]
         assert any(item["name"] == "clearHistory" for item in metadata["actions"])
