@@ -173,9 +173,11 @@ with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
     if resource_output.is_symlink() or (resource_output.exists() and not resource_output.is_dir()):
         raise SystemExit("The resource output must be a directory inside the build directory")
     resource_output.mkdir(exist_ok=True)
-    for resource in sorted(framework_resources.glob("*.nls")):
-        if resource.is_file():
-            shutil.copyfile(resource, resource_output / resource.name)
+    resource_files = sorted(resource for resource in framework_resources.glob("*.nls") if resource.is_file())
+    if not resource_files:
+        raise SystemExit("The Z8 server localization resources are empty")
+    for resource in resource_files:
+        shutil.copyfile(resource, resource_output / resource.name)
 
     public = temp / "public"
     assemble(original, public)

@@ -32,7 +32,9 @@ with tempfile.TemporaryDirectory() as directory:
     extra = ["--openxlsx-dir", str(options.openxlsx_dir.resolve())] if options.openxlsx_dir else []
     subprocess.run([sys.executable, str(stage / "build.py"), "--z8-d", str(root), "--postgres-bin", str(pg), *extra], env=env, check=True)
     resources = root / "vendor/z8/org.zenframework.z8.server/WEB-INF/resources"
-    for original_resource in resources.glob("*.nls"):
+    original_resources = sorted(resources.glob("*.nls"))
+    assert original_resources, "The bundled server translations are missing"
+    for original_resource in original_resources:
         assert (stage / "build/resources" / original_resource.name).read_bytes() == original_resource.read_bytes()
     if options.openxlsx_dir:
         bridge = stage / "build" / ("z8_openxlsx.dll" if os.name == "nt" else "libz8_openxlsx.so")
