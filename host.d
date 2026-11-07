@@ -18,6 +18,7 @@ import z8.integration.postgres_authority;
 import z8.webserver.civetweb;
 import z8gen.project_registry;
 version (Windows) import z8.ldap.windows : z8_windows_ldap_configure;
+version (Z8OpenXlsx) import z8.xlsx.poi : z8_openxlsx_configure;
 import z8gen.org.zenframework.z8.template_.SchemaGenerator;
 
 class SchedulerObserver : IZ8SchedulerObserver {
@@ -42,6 +43,7 @@ void main(string[] args) {
     if (!configPath.length && exists("server.properties")) configPath = "server.properties";
     if (configPath.length) z8_server_configure_from_file(configPath);
     version (Windows) z8_windows_ldap_configure();
+    version (Z8OpenXlsx) z8_openxlsx_configure();
     auto listenAddress = z8_server_http_listen_address();
     if (!initialize) z8_export_configure_pdf_font(buildPath(publicDirectory, "css", "fonts", "roboto", "roboto-regular.ttf"));
     auto db = new Z8PostgresConnection(args[1]); scope(exit) db.close();

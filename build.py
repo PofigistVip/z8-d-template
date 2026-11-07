@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--z8-d", type=Path, default=os.environ.get("Z8_D_ROOT"), required=not os.environ.get("Z8_D_ROOT"), help="Path to the z8-d checkout")
 parser.add_argument("--original-z8", type=Path, help="Optional legacy override for the bundled Z8 sources")
 parser.add_argument("--postgres-bin", type=Path, help="PostgreSQL bin directory (or set Z8_PG_BIN)")
+parser.add_argument("--openxlsx-dir", type=Path, help="Directory with the built OpenXLSX bridge")
 parser.add_argument("--core-library", type=Path, help="Use an existing compiled Z8 core library")
 parser.add_argument("--library", type=Path, action="append", default=[], help="Additional compiled BL library (repeatable)")
 options = parser.parse_args()
@@ -36,6 +37,10 @@ if os.name == "nt" and not (pg_bin.parent / "lib/libpq.lib").is_file():
 sys.path.insert(0, str(root / "webserver"))
 from build_civetweb import build
 from prepare_client import assemble
+sys.path.insert(0, str(root / "xlsx"))
+from build_support import link_args as openxlsx_link_args, deploy as deploy_openxlsx
+openxlsx_args, openxlsx_shared = (openxlsx_link_args(root, options.openxlsx_dir)
+                                  if options.openxlsx_dir else ([], None))
 
 
 def core_fingerprint():
@@ -148,9 +153,12 @@ with tempfile.TemporaryDirectory(prefix=".build-", dir=generated) as directory:
     args += [str(pg_bin.parent / "lib/libpq.lib")] if os.name == "nt" else ["-L-lpq", "-L-lpthread", "-L-ldl"]
     if os.name == "nt":
         args += ["-I" + str(root / "ldap/source"), str(root / "ldap/source/z8/ldap/windows.d")]
+    args += openxlsx_args
     response = temp / "dmd.rsp"
     response.write_text("\n".join('"' + arg.replace('\\', '/') + '"' for arg in args), encoding="utf-8")
     subprocess.run(["dmd", "@" + str(response)], cwd=temp, check=True)
+    if openxlsx_shared is not None:
+        deploy_openxlsx(openxlsx_shared, output)
 
     public = temp / "public"
     assemble(original, public)

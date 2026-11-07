@@ -12,6 +12,7 @@ project = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--z8-d", type=Path, required=True)
 parser.add_argument("--postgres-bin", type=Path, required=True)
+parser.add_argument("--openxlsx-dir", type=Path)
 options = parser.parse_args()
 root, pg = options.z8_d.resolve(), options.postgres_bin.resolve()
 
@@ -28,7 +29,11 @@ with tempfile.TemporaryDirectory() as directory:
     failed = subprocess.run([sys.executable, str(stage / "build.py"), "--z8-d", str(root), "--postgres-bin", str(pg),
                              "--library", str(incompatible)], env=env, capture_output=True, text=True)
     assert failed.returncode and "another DMD version" in failed.stderr, failed.stderr
-    subprocess.run([sys.executable, str(stage / "build.py"), "--z8-d", str(root), "--postgres-bin", str(pg)], env=env, check=True)
+    extra = ["--openxlsx-dir", str(options.openxlsx_dir.resolve())] if options.openxlsx_dir else []
+    subprocess.run([sys.executable, str(stage / "build.py"), "--z8-d", str(root), "--postgres-bin", str(pg), *extra], env=env, check=True)
+    if options.openxlsx_dir:
+        bridge = stage / "build" / ("z8_openxlsx.dll" if os.name == "nt" else "libz8_openxlsx.so")
+        assert bridge.is_file(), "OpenXLSX library was not deployed"
     if os.name == "nt":
         invalid = stage / "invalid-ldap.properties"
         invalid.write_text("ldap.read.pageSize=-1\n", encoding="ascii")
