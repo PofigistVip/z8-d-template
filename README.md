@@ -63,21 +63,40 @@ DMD библиотека пересобирается автоматически
 ## Запуск
 
 Заранее создайте базу и схему, в которой пользователь подключения может создавать
-таблицы. В каталоге проекта выполните:
+таблицы. Подключение задаётся в `server.properties` теми же свойствами, что и в
+Java Z8:
 
-```powershell
-$connection = 'host=127.0.0.1 dbname=z8 user=z8 password=z8'
-./build/z8-template.exe $connection public --initialize
-# Установите пароль Admin в SystemUsers, как описано ниже.
-./build/z8-template.exe $connection public
+```properties
+application.database.connection=jdbc:postgresql://127.0.0.1:5432/z8-d-template
+application.database.schema=public
+application.database.user=z8
+application.database.password=z8
+application.database.driver=org.postgresql.Driver
 ```
 
-При `--initialize` запускается генератор схемы приложения, в том числе его BL-хуки
-настройки прав и меню. Для администратора задайте пароль в `SystemUsers`: поле
-`Password` содержит MD5 пароля в представлении, ожидаемом Z8. Например, для
-локальной базы можно выполнить `UPDATE "SystemUsers" SET "Password" = md5('пароль')
-WHERE "RecordId" = '00000000-0000-0000-0000-000000000002'`. Используйте собственные
-учётные данные.
+Допускается также строка подключения libpq или адрес `postgresql://`; имя
+пользователя и пароль из отдельных свойств имеют приоритет над параметрами адреса.
+Пароль и другие локальные настройки можно хранить в игнорируемом Git файле
+`server.local.properties`, передавая его через `--config`. Это отдельный файл
+конфигурации: перед редактированием скопируйте в него `server.properties`.
+
+В PowerShell из каталога шаблона добавьте PostgreSQL в PATH, а при первом запуске
+выполните генератор схемы приложения:
+
+```powershell
+$env:Path = "C:\Program Files\PostgreSQL\15\bin;$env:Path"
+.\build\z8-template.exe --initialize
+.\build\z8-template.exe
+```
+
+При `--initialize` запускается генератор схемы, включая BL-хуки настройки прав
+и меню. Пароль администратора хранится в `SystemUsers` как MD5; задать пустой
+пароль можно запросом `UPDATE "SystemUsers" SET "Password" = md5('') WHERE
+"RecordId" = '00000000-0000-0000-0000-000000000002'`. Логин — `Admin`.
+
+Для совместимости допускаются прежние позиционные аргументы подключения и схемы:
+`.\build\z8-template.exe '<строка libpq>' public`. Они полностью заменяют
+настройки подключения из файла.
 
 Адрес и порт сервера задаются в `server.properties` свойствами
 `web.server.http.host` и `web.server.http.port`; в шаблоне это

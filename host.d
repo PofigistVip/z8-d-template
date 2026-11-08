@@ -32,22 +32,44 @@ class DisabledSchedulerControl : IZ8SchedulerControl, IZ8SchedulerSuspension {
 }
 
 void main(string[] args) {
-    if (args.length < 3) throw new Exception("usage: z8-template <postgres-connection> <schema> [--initialize] [--public-dir <path>] [--config <path>]");
     bool initialize; string publicDirectory = "build/public", configPath;
-    for (size_t i = 3; i < args.length; ++i) {
+    string[] positional;
+    for (size_t i = 1; i < args.length; ++i) {
         if (args[i] == "--initialize" && !initialize) initialize = true;
         else if (args[i] == "--public-dir" && i + 1 < args.length) publicDirectory = args[++i];
         else if (args[i] == "--config" && !configPath.length && i + 1 < args.length) configPath = args[++i];
+        else if (!args[i].startsWith("--")) positional ~= args[i];
         else throw new Exception("invalid option");
     }
+    if (positional.length != 0 && positional.length != 2)
+        throw new Exception("usage: z8-template [<postgres-connection> <schema>] [--initialize] [--public-dir <path>] [--config <path>]");
     if (!configPath.length && exists("server.properties")) configPath = "server.properties";
     if (configPath.length) z8_server_configure_from_file(configPath);
     version (Windows) z8_windows_ldap_configure();
     version (Z8OpenXlsx) z8_openxlsx_configure();
     auto listenAddress = z8_server_http_listen_address();
     if (!initialize) z8_export_configure_pdf_font(buildPath(publicDirectory, "css", "fonts", "roboto", "roboto-regular.ttf"));
-    auto db = new Z8PostgresConnection(args[1]); scope(exit) db.close();
-    auto schema = args[2].to!wstring;
+    string connectionInfo, databaseUser, databasePassword;
+    wstring schema;
+    if (positional.length) {
+        connectionInfo = positional[0]; schema = positional[1].to!wstring;
+    } else {
+        auto configuredConnection = z8_server_config_value("application.database.connection"w);
+        schema = z8_server_config_value("application.database.schema"w);
+        if (configuredConnection is null || !configuredConnection.length)
+            throw new Exception("application.database.connection is required in server.properties");
+        if (schema is null || !schema.length)
+            throw new Exception("application.database.schema is required in server.properties");
+        auto driver = z8_server_config_value("application.database.driver"w);
+        if (driver !is null && driver.length && driver != "org.postgresql.Driver"w)
+            throw new Exception("application.database.driver must be org.postgresql.Driver");
+        connectionInfo = z8_to_utf8(configuredConnection);
+        if (connectionInfo.startsWith("jdbc:postgresql://")) connectionInfo = connectionInfo[5 .. $];
+        else if (connectionInfo.startsWith("jdbc:")) throw new Exception("application.database.connection must use PostgreSQL");
+        databaseUser = z8_to_utf8(z8_server_config_value("application.database.user"w));
+        databasePassword = z8_to_utf8(z8_server_config_value("application.database.password"w));
+    }
+    auto db = new Z8PostgresConnection(connectionInfo, databaseUser, databasePassword); scope(exit) db.close();
     auto registry = new Z8RuntimeRegistry(); z8_register_project(registry);
     auto previousRegistry = z8_runtime_set_registry(registry);
     scope(exit) z8_runtime_set_registry(previousRegistry);

@@ -43,7 +43,11 @@ mine = "org.zenframework.z8.template.view.MyDocuments"
 with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as (connection, env):
     temp = Path(directory)
     config = temp / "server.properties"
-    settings = "web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n"
+    port = re.search(r"(?:^| )port=(\d+)(?: |$)", connection).group(1)
+    settings = ("web.server.http.host=127.0.0.1\nweb.server.http.port=19080\nweb.client.hashPassword=false\nscheduler.enabled=false\n"
+                + f"application.database.connection=jdbc:postgresql://127.0.0.1:{port}/postgres?user=wrong\n"
+                + "application.database.schema=public\napplication.database.user=postgres\napplication.database.password=\n"
+                + "application.database.driver=org.postgresql.Driver\n")
     if os.environ.get("Z8_TEST_FILES_ON_DISK") == "1":
         settings += "files.saveOnDisk=true\n"
     pdfinfo = os.environ.get("Z8_TEST_PDFINFO") or shutil.which("pdfinfo")
@@ -53,10 +57,29 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
     if office_home:
         settings += "office.home=" + Path(office_home).resolve().as_posix() + "\n"
     config.write_text(settings, encoding="utf-8")
-    command = [str(exe), connection, "public", "--initialize", "--config", str(config)]
-    for _ in range(2):
+    for command in ([str(exe), "--initialize"],
+                    [str(exe), "--initialize", "--config", str(config)],
+                    [str(exe), connection, "public", "--initialize", "--config", str(config)]):
         result = subprocess.run(command, env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8", check=True)
         assert result.stdout.strip() == "initialized", result.stdout
+    libpq_config = temp / "libpq.properties"
+    libpq_config.write_text(settings.replace(f"jdbc:postgresql://127.0.0.1:{port}/postgres?user=wrong", connection), encoding="utf-8")
+    libpq_result = subprocess.run([str(exe), "--initialize", "--config", str(libpq_config)], env=env, cwd=temp,
+                                  capture_output=True, text=True, encoding="utf-8", check=True)
+    assert libpq_result.stdout.strip() == "initialized", libpq_result.stdout
+    legacy_config = temp / "legacy.properties"
+    legacy_config.write_text(settings.replace(f"jdbc:postgresql://127.0.0.1:{port}/postgres?user=wrong", "host=127.0.0.1 port=1 dbname=invalid connect_timeout=1"), encoding="utf-8")
+    legacy_result = subprocess.run([str(exe), connection, "public", "--initialize", "--config", str(legacy_config)],
+                                   env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8", check=True)
+    assert legacy_result.stdout.strip() == "initialized", legacy_result.stdout
+    missing_db = temp / "missing-db.properties"
+    missing_db.write_text("web.server.http.port=19080\n", encoding="ascii")
+    missing = subprocess.run([str(exe), "--initialize", "--config", str(missing_db)], env=env, cwd=temp, capture_output=True, text=True)
+    assert missing.returncode and "application.database.connection" in missing.stderr, missing.stderr
+    invalid_driver = temp / "invalid-driver.properties"
+    invalid_driver.write_text(settings.replace("org.postgresql.Driver", "org.example.OtherDriver"), encoding="utf-8")
+    rejected = subprocess.run([str(exe), "--initialize", "--config", str(invalid_driver)], env=env, cwd=temp, capture_output=True, text=True)
+    assert rejected.returncode and "application.database.driver" in rejected.stderr, rejected.stderr
     invalid_config = temp / "invalid.properties"
     for invalid in ("0", "65536", "not-a-port"):
         invalid_config.write_text("web.server.http.port=" + invalid + "\n", encoding="ascii")
@@ -64,14 +87,37 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
                                 env=env, cwd=temp, capture_output=True, text=True, encoding="utf-8")
         assert result.returncode and "web.server.http.port" in result.stderr, result.stderr
     subprocess.run([str(psql), "-v", "ON_ERROR_STOP=1", "-c",
-                    '''UPDATE "SystemUsers" SET "Password"=md5('template-test') WHERE "RecordId"='00000000-0000-0000-0000-000000000002' ''', connection],
+                    '''UPDATE "SystemUsers" SET "Password"=md5('') WHERE "RecordId"='00000000-0000-0000-0000-000000000002' ''', connection],
                    env=env, capture_output=True, check=True)
+
+    hashed_config = temp / "hashed.properties"
+    hashed_config.write_text(settings.replace("web.client.hashPassword=false", "web.client.hashPassword=true"), encoding="utf-8")
+    hashed_server = subprocess.Popen([str(exe), "--public-dir", str(public), "--config", str(hashed_config)],
+                                     env=env, cwd=temp, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, encoding="utf-8")
+    try:
+        hashed_port = hashed_server.stdout.readline().strip()
+        if hashed_port != "19080":
+            raise RuntimeError("Hashed-password server did not start: " + hashed_port + hashed_server.stderr.read())
+        client = http.client.HTTPConnection("127.0.0.1", int(hashed_port), timeout=30)
+        try:
+            query = urlencode({"request": "login", "login": "Admin", "password": hashlib.md5(b"").hexdigest()})
+            client.request("GET", "/request.json?" + query)
+            response = client.getresponse()
+            result = json.loads(response.read())
+            assert response.status == 200 and result.get("success"), (response.status, result)
+        finally:
+            client.close()
+    finally:
+        if hashed_server.poll() is None:
+            hashed_server.communicate("\n", timeout=20)
+    assert hashed_server.returncode == 0, hashed_server.returncode
 
     def sql(query):
         return subprocess.check_output([str(psql), "-tAc", query, connection], env=env, text=True).strip()
 
     assert sql('SELECT count(*) FROM "Tmp Statuses" WHERE "RecordId" <> \'00000000-0000-0000-0000-000000000000\'') == "3"
-    server = subprocess.Popen([str(exe), connection, "public", "--public-dir", str(public)],
+    server = subprocess.Popen([str(exe), "--public-dir", str(public)],
                               env=env, cwd=temp, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, encoding="utf-8")
     try:
@@ -109,7 +155,7 @@ with tempfile.TemporaryDirectory() as directory, temporary_postgres(bin_dir) as 
         assert status == 200 and debug_script == script
         status, debug_css = http_request("/debug/css/z8-template.css")
         assert status == 200 and debug_css
-        login = request(request="login", login="Admin", password="template-test")
+        login = request(request="login", login="Admin", password="")
         assert {documents, mine} <= {entry["request"] for entry in login["user"]["entries"]}
         session = login["session"]
         system_tables = "org.zenframework.z8.server.base.table.system.view.TablesView"
